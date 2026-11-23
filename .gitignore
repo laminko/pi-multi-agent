@@ -1,0 +1,5 @@
+node_modules/
+.DS_Store
+*.tgz
+# local pi state, if the project is ever used with project-local settings
+.pi/sessions/
