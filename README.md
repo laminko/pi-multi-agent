@@ -1,108 +1,87 @@
 # pi-multi-agent
 
-A **manager pi** that runs **worker pis**. Each worker is a long-lived `pi --mode rpc` process with its own
-context window, model, thinking level, tools and system-prompt role. The manager's LLM gets `worker_*` tools.
-You get live visibility into every worker: thinking, output, tool calls, status, cost and results.
+A **manager pi** that runs **worker pis**, so one pi session can delegate work to several others in parallel
+and still show you what each one is doing: its thinking, progress, status and result.
+
+Each worker is a long-lived `pi --mode rpc` process with its own context window, model, thinking level, tool
+allowlist and role prompt. The manager's LLM gets `worker_*` tools to spawn, message, wait for, inspect and stop
+workers. You get a live widget, a full-screen viewer, log files and the workers' own pi sessions.
 
 ```
-you ──► manager pi (this extension)
-          ├── worker_spawn / worker_send / worker_wait / worker_status / worker_stop
-          ├── widget above the editor (live status + latest thinking)
-          └── /workers viewer (full live transcript per worker)
-                │ JSONL over stdin/stdout (pi RPC mode)
-     ┌──────────┼──────────┐
-  worker pi  worker pi  worker pi      ← each a full pi with its own session file + log
+you ──► manager pi (+ this extension)
+          ├─ tools: worker_spawn · worker_send · worker_wait · worker_status · worker_stop
+          ├─ widget above the editor (status, latest thinking, cost)
+          └─ /workers viewer (live thinking, output, tool calls)
+                 │ JSONL over stdin/stdout (pi RPC mode)
+     ┌───────────┼───────────┐
+  worker pi   worker pi   worker pi      each with its own session file + live log
 ```
 
-## Install
+**Status:** v0.1.0, a working prototype whose core flows were verified end-to-end. See [STATUS.md](STATUS.md).
 
-Try it for one session:
+## Quick start
 
 ```bash
+# try it for one session
 pi -e /path/to/pi-multi-agent/extensions/multi-agent/index.ts
-```
 
-Or install it as a package (adds it to `~/.pi/agent/settings.json`, so every pi session gets the tools):
-
-```bash
+# or enable it everywhere (-l: only this project)
 pi install /path/to/pi-multi-agent
 ```
 
-Use `pi install -l …` instead to enable it only for the current project (`.pi/settings.json`).
+Then ask the manager in plain language:
 
-## Use
+> Spawn three workers in parallel: one reviews `src/auth` for security issues (read-only), one writes tests for
+> `src/api/users.ts`, one checks `docs/` for outdated examples. Wait for all of them and summarize.
 
-Just ask the manager, e.g.:
+While they run:
 
-> Spawn three workers in parallel: one reviews `src/auth` for security issues (read-only),
-> one writes tests for `src/api/users.ts`, one checks the docs for outdated examples. Wait for all and summarize.
+- the **widget** above the editor shows each worker's status, turns, tool calls, cost, elapsed time, and its latest
+  thinking (💭) or current tool (⟳);
+- **`/workers`** opens a live viewer with the full thinking, output and tool calls. `←/→` switches worker, `m` messages
+  it, `a` aborts, `k` kills;
+- **`scripts/watch.sh`** follows the live logs from another terminal.
 
-The manager writes a self-contained task for each worker (workers cannot see the manager's conversation),
-starts them, and collects results with `worker_wait`. If it does not wait, each result is delivered to it
-automatically when the worker finishes, and the manager wakes up to handle it.
+If the manager does not wait, each result is delivered to it automatically when the worker finishes.
 
-### Tools (for the manager LLM)
+## Features
 
-| Tool | What it does |
+- Parallel workers with independent context, model, thinking level, tools (`read,grep,find,ls` = read-only) and role
+- Long-lived workers: give follow-up work, steer mid-task, abort without killing
+- Auto-notification of results, or explicit `worker_wait` with live progress
+- Live visibility: widget, `/workers` viewer, streamed `.log` files, compact `.events.jsonl`, final `.result.md`,
+  and a persisted pi session per worker (viewable in pi or pi-web)
+- Worker dialogs (e.g. permission prompts from your extensions) are forwarded to you
+- Clean lifecycle: workers stop with the manager session, with escalation from abort to signals. No orphans
+- Works in the interactive TUI and in RPC hosts such as pi-web (plain-text widget)
+
+## Documentation
+
+| Document | Read it for |
 |---|---|
-| `worker_spawn` | Start a worker with `name`, `task`, optional `role` (appended system prompt), `model`, `thinking`, `tools` (allowlist, e.g. `read,grep,find,ls` for read-only), `cwd`, `wait`, `notify` |
-| `worker_send` | Message a worker. Idle: starts a new task (it keeps its context). Busy: `steer` (redirect after current step) or `followUp` (queue) |
-| `worker_wait` | Block until the named workers (default: all running/unreported) finish; returns their final answers. Shows live progress while waiting |
-| `worker_status` | One line per worker, or a detailed report: latest thinking, recent activity, result |
-| `worker_stop` | `abort` the current task (worker stays alive) or `kill` the process; `name: "all"` works |
+| [User Guide](docs/user-guide.md) | Mental model, prompting patterns, writing worker tasks, stepping in, cost, FAQ |
+| [Observability](docs/observability.md) | Seeing thinking, progress, status and results: widget, viewer, logs, `jq` recipes, session files |
+| [Reference](docs/reference.md) | Tool parameters and defaults, result format, commands, keys, statuses, files, env vars, limits |
+| [Architecture](docs/architecture.md) | Internals: process model, RPC usage, state machine, notification, UI, design decisions |
+| [Runbook](RUNBOOK.md) | Install, smoke tests, operating, troubleshooting, emergency stop, maintenance |
+| [Status & Progress](STATUS.md) | What's done and verified, known issues, roadmap, progress log |
 
-Workers inherit the manager's model and thinking level unless `model`/`thinking` are given.
-
-## See what workers are doing
-
-| Where | What you see |
-|---|---|
-| **Widget** (above the editor, automatic) | One row per worker: status, turns, tool calls, context, cost, elapsed time, and the **latest thinking** (💭), current tool call (⟳), or final answer (→) |
-| **`/workers [name]`** | Full-screen live viewer: task, streaming **thinking** (┊), output (│), tool calls (▶) and results (✓/✗), retries, compaction, errors. Keys: `←/→` switch worker · `↑/↓ PgUp/PgDn Home/End` scroll · `m` message the worker (steers it if busy) · `a` abort · `k` kill · `esc` close |
-| **Log files** | `~/.pi/agent/multi-agent/runs/<time>-<session>/` (and `…/multi-agent/latest`): `<name>.log` (human-readable, streamed live), `<name>.result.md` (last final answer), `<name>.events.jsonl` (lifecycle events with timestamps), `<name>.stderr.log`, `<name>.role.md` |
-| **Another terminal** | `scripts/watch.sh` (all workers of the latest run) or `scripts/watch.sh <name>`: `tail -F` of the live logs |
-| **Session files** | Each worker saves a normal pi session named `worker:<name>` (path shown in the viewer and in `worker_status`). Open it later with `pi --session <path>`, or browse it in pi-web, including the full thinking |
-| **Tool rows** | `worker_wait` streams a live status table while it waits; results render collapsed (`ctrl+o` expands) |
-
-Commands for you: `/workers`, `/worker-send <name> <message>`, `/worker-stop <name|all> [kill]`, `/workers-clear`
-(removes finished/killed workers from the list).
-
-In RPC hosts such as pi-web or IDEs, the widget is sent as plain text lines (refreshed about once per second),
-and worker dialogs are forwarded through the host's UI.
-
-## Behavior worth knowing
-
-- **Thinking visibility depends on the model/provider.** Pi streams whatever reasoning text the provider returns.
-  With `claude-code` models, thinking is adaptive and summarized: you get it for non-trivial work, but
-  often none for trivial prompts. Some providers return none, or redacted reasoning.
-- **Workers are full pi instances.** They load your settings, packages, skills and AGENTS.md like any pi.
-  They do not load the manager tools (the extension disables itself in workers via `PI_MULTI_AGENT_ROLE=worker`),
-  so workers cannot spawn workers.
-- **Dialogs from workers** (for example a permission prompt from one of your extensions) pop up in the manager UI, prefixed
-  `[worker <name>]`. Without a UI (print mode), they are cancelled.
-- **Workers live as long as the manager session.** Quitting, `/new`, `/resume`, `/fork` and `/reload` stop all workers
-  (abort, then graceful exit, escalating to signals). If the manager dies, workers see stdin EOF and exit.
-- **Parallel edits:** there is no cross-process file locking. Give workers disjoint files or modules.
-- **Cost:** every worker has its own context and usage. The widget, viewer and `worker_status` show per-worker cost,
-  but child usage is not added to the manager's footer totals.
-
-## Configuration (environment variables)
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `PI_MULTI_AGENT_MAX_WORKERS` | `8` | Max live workers |
-| `PI_MULTI_AGENT_DIR` | `~/.pi/agent/multi-agent` | Where run logs go |
-| `PI_MULTI_AGENT_WORKER_ARGS` | (none) | Extra CLI args for every worker, split on whitespace. Examples: `--no-session` (no worker session files), `--no-extensions` (lean workers), `--session-dir /path` |
-
-## Files
+## Repository layout
 
 ```
 extensions/multi-agent/
-  index.ts    tools, commands, widget, auto-notify, session lifecycle
-  worker.ts   Worker: spawns `pi --mode rpc`, strict JSONL client, state tracking, logs, dialog forwarding
-  ui.ts       widget + /workers live viewer (pi-tui components)
-  format.ts   shared formatting
+  index.ts       entry: tools, commands, widget, auto-notify, lifecycle
+  worker.ts      one worker: spawns `pi --mode rpc`, JSONL client, state, logs, shutdown
+  ui.ts          widget + /workers viewer
+  format.ts      shared formatting
 scripts/
   watch.sh          tail worker logs from another terminal
-  smoke-worker.ts   test the RPC worker layer without a manager:  node scripts/smoke-worker.ts
+  smoke-worker.ts   smoke test for the worker RPC layer (node scripts/smoke-worker.ts)
+docs/            user guide, observability, reference, architecture
+RUNBOOK.md  STATUS.md  package.json (pi package manifest)
 ```
+
+## Requirements
+
+pi 1.6.0 (tested), with a configured model. Node.js with TypeScript type stripping (≥ 22.18) is needed only for
+`scripts/smoke-worker.ts`.
