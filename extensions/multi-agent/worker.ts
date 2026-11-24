@@ -29,6 +29,38 @@ export type WorkerStatus =
 	| "crashed"
 	| "interrupted";
 
+/**
+ * Verdict of the manager's health check on a busy worker (see health.ts). "waiting": a dialog waits for you, which is
+ * not a fault, so it is never alerted.
+ */
+export type HealthState = "ok" | "quiet" | "unresponsive" | "looping" | "waiting";
+
+/** Health check state of one worker. Owned by health.ts; reset when a task starts or settles. */
+export interface WorkerHealth {
+	state: HealthState;
+	/** Start of the current problem: the last event (quiet), the first failed check (unresponsive), the streak start (looping). */
+	since?: number;
+	detail: string;
+	/** Alerts sent over the worker's life. Never reset: a waiting worker_wait compares it to see a new alert. */
+	alerts: number;
+	/** Alerts sent in the current problem; > 0 means a recovery is worth a toast. */
+	episodeAlerts: number;
+	nextAlertAt?: number;
+	/** A heartbeat is in flight. */
+	checking: boolean;
+	lastCheckAt?: number;
+	lastReplyAt?: number;
+	/** Failed heartbeats in a row, and when the first of them was sent. */
+	failures: number;
+	firstFailureAt?: number;
+	/** From the last heartbeat reply (`get_state`). */
+	remote?: { isStreaming?: boolean; isCompacting?: boolean; pendingMessageCount?: number };
+}
+
+export function freshHealth(alerts = 0): WorkerHealth {
+	return { state: "ok", detail: "", alerts, episodeAlerts: 0, checking: false, failures: 0 };
+}
+
 /** Payload of the "record" event: persistent state changed. `task` is set when a new task starts. */
 export interface RecordEvent {
 	task?: string;
@@ -240,6 +272,19 @@ export class Worker extends EventEmitter {
 	/** Bumped on every change so renderers can cache. */
 	version = 0;
 
+	// Inputs of the health check (health.ts).
+	/** Last sign of progress: a session event or dialog from the worker, or a new task. RPC responses do not count. */
+	lastEventAt = Date.now();
+	/** Dialogs waiting for you, the title of the newest one, and when the first one opened. */
+	dialogs = 0;
+	dialogTitle = "";
+	dialogSince?: number;
+	/** Identical tool calls (same tool, same arguments) in a row, and when the streak began. */
+	repeatCount = 0;
+	repeatLabel = "";
+	repeatSince?: number;
+	health: WorkerHealth = freshHealth();
+
 	private host: WorkerHost;
 	private proc?: ChildProcess;
 	private pending = new Map<string, Pending>();
@@ -254,6 +299,9 @@ export class Worker extends EventEmitter {
 	private spawnError?: Error;
 	private streamEntries = new Map<number, TranscriptEntry>();
 	private streamed = { thinking: false, text: false };
+	private repeatKey = "";
+	/** Ids of heartbeat requests: their replies stay out of <name>.events.jsonl. */
+	private quietIds = new Set<string>();
 
 	constructor(config: WorkerConfig, host: WorkerHost) {
 		super();
@@ -382,23 +430,30 @@ export class Worker extends EventEmitter {
 
 	// ---------------------------------------------------------------- commands
 
-	/** Send a command and resolve with its response data. */
-	request(command: Record<string, unknown>, timeoutMs = COMMAND_TIMEOUT_MS): Promise<any> {
+	/** Send a command and resolve with its response data. `quiet`: keep the response out of the events log. */
+	request(command: Record<string, unknown>, timeoutMs = COMMAND_TIMEOUT_MS, quiet = false): Promise<any> {
 		if (!this.proc || this.exited || !this.proc.stdin?.writable) {
 			return Promise.reject(new Error(`worker "${this.name}" is not running`));
 		}
 		const id = `ma-${++this.nextId}`;
+		if (quiet) this.quietIds.add(id);
 		return new Promise((resolve, reject) => {
 			const timer =
 				timeoutMs > 0
 					? setTimeout(() => {
 							this.pending.delete(id);
+							this.quietIds.delete(id);
 							reject(new Error(`worker "${this.name}": ${String(command.type)} timed out`));
 						}, timeoutMs)
 					: undefined;
 			this.pending.set(id, { resolve, reject, timer });
 			this.write({ ...command, id });
 		});
+	}
+
+	/** Heartbeat for the health check: `get_state`, answered by a live RPC loop even while a task runs. */
+	ping(timeoutMs: number): Promise<any> {
+		return this.request({ type: "get_state" }, timeoutMs, true);
 	}
 
 	/** Start a new task (worker must be idle). */
@@ -416,6 +471,9 @@ export class Worker extends EventEmitter {
 		this.lastStopReason = undefined;
 		this.lastText = "";
 		this.thinkingTail = "";
+		this.lastEventAt = Date.now();
+		this.resetRepeat();
+		this.health = freshHealth(this.health.alerts);
 		this.addEntry(label === "TASK" ? "task" : "message", text);
 		this.writeLog(`\n━━━━ ${clock()} ${label} ━━━━\n${text}\n`);
 		this.changed();
@@ -482,7 +540,8 @@ export class Worker extends EventEmitter {
 		} catch {
 			return;
 		}
-		const slim = slimEvent(record);
+		const heartbeat = record.type === "response" && this.quietIds.delete(record.id);
+		const slim = heartbeat ? undefined : slimEvent(record);
 		if (slim) {
 			this.events?.write(`${JSON.stringify({ t: Date.now(), ...slim })}\n`);
 		}
@@ -508,6 +567,9 @@ export class Worker extends EventEmitter {
 		const method = request.method;
 		if (method === "select" || method === "confirm" || method === "input" || method === "editor") {
 			const previous = this.activity;
+			this.lastEventAt = Date.now();
+			if (this.dialogs++ === 0) this.dialogSince = Date.now();
+			this.dialogTitle = String(request.title ?? method);
 			this.activity = `waiting for you: ${request.title ?? method}`;
 			this.addEntry("info", `dialog (${method}): ${request.title ?? ""} ${request.message ?? ""}`.trim());
 			this.writeLog(`\n? ${clock()} dialog (${method}): ${request.title ?? ""} ${request.message ?? ""}\n`);
@@ -518,11 +580,18 @@ export class Worker extends EventEmitter {
 			} catch {
 				response = { cancelled: true };
 			}
+			if (--this.dialogs <= 0) {
+				this.dialogs = 0;
+				this.dialogSince = undefined;
+			}
+			// The answer is progress too: the time spent waiting for you is not the worker being quiet.
+			this.lastEventAt = Date.now();
 			this.write({ type: "extension_ui_response", id: request.id, ...response });
 			this.writeLog(`  → ${JSON.stringify(response)}\n`);
 			if (this.activity.startsWith("waiting for you")) this.activity = previous;
 			this.changed();
 		} else if (method === "notify") {
+			this.lastEventAt = Date.now();
 			const level = request.notifyType === "error" || request.notifyType === "warning" ? request.notifyType : "info";
 			this.addEntry(level === "error" ? "error" : "info", `notify: ${request.message ?? ""}`);
 			this.writeLog(`\n• ${clock()} notify (${level}): ${request.message ?? ""}\n`);
@@ -533,6 +602,7 @@ export class Worker extends EventEmitter {
 	}
 
 	private handleEvent(event: any): void {
+		this.lastEventAt = Date.now(); // any session event, streaming deltas included, shows the worker is moving
 		switch (event.type) {
 			case "agent_start":
 				this.busy = true;
@@ -557,6 +627,7 @@ export class Worker extends EventEmitter {
 			case "tool_execution_start": {
 				this.toolCalls++;
 				const summary = summarizeToolArgs(event.toolName, event.args);
+				this.countRepeat(event.toolName, event.args, `${event.toolName} ${summary}`.trim());
 				this.activity = `${event.toolName} ${summary}`.trim();
 				this.addEntry("tool", `${event.toolName} ${summary}`.trim());
 				this.writeLog(`\n▶ ${event.toolName} ${summary}\n`);
@@ -710,6 +781,7 @@ export class Worker extends EventEmitter {
 	private handleSettled(aborted: boolean): void {
 		this.busy = false;
 		this.queued = 0;
+		this.health = freshHealth(this.health.alerts);
 		this.taskFinishedAt = Date.now();
 		this.status = aborted ? "aborted" : this.lastStopReason === "error" ? "error" : "idle";
 		this.result = this.lastText || undefined;
@@ -730,6 +802,8 @@ export class Worker extends EventEmitter {
 		this.exited = true;
 		const wasBusy = this.busy;
 		this.busy = false;
+		this.health = freshHealth(this.health.alerts);
+		this.quietIds.clear();
 		const reason = this.spawnError
 			? `failed to start pi: ${this.spawnError.message}`
 			: `pi exited (code ${code ?? "null"}, signal ${signal ?? "none"})`;
@@ -759,6 +833,31 @@ export class Worker extends EventEmitter {
 	}
 
 	// ---------------------------------------------------------------- helpers
+
+	/** Count identical tool calls in a row. Full arguments, so edits to one file with different text do not count. */
+	private countRepeat(toolName: string, args: unknown, label: string): void {
+		let key: string;
+		try {
+			key = `${toolName}\u0000${JSON.stringify(args ?? null)}`;
+		} catch {
+			key = `${toolName}\u0000${label}`;
+		}
+		if (key === this.repeatKey) {
+			this.repeatCount++;
+			return;
+		}
+		this.repeatKey = key;
+		this.repeatCount = 1;
+		this.repeatLabel = label;
+		this.repeatSince = Date.now();
+	}
+
+	private resetRepeat(): void {
+		this.repeatKey = "";
+		this.repeatCount = 0;
+		this.repeatLabel = "";
+		this.repeatSince = undefined;
+	}
 
 	private streamEntry(index: number, kind: EntryKind): TranscriptEntry {
 		let entry = this.streamEntries.get(index);

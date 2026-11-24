@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.7.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.8.0: tools, commands, keys, statuses, health checks, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -8,6 +8,7 @@ For how to use them, see the [User Guide](user-guide.md).
 - [Slash commands](#slash-commands)
 - [Viewer keys](#viewer-keys)
 - [Worker statuses](#worker-statuses)
+- [Health checks](#health-checks)
 - [Files](#files)
 - [Environment variables](#environment-variables)
 - [Limits and timeouts](#limits-and-timeouts)
@@ -69,12 +70,16 @@ The manager is told to call it only when you ask it to wait. By default, results
 Default targets: every busy worker, plus every finished worker whose result has not been reported yet (and that is
 not being stopped). With no targets, it returns the status of all workers immediately.
 
-While waiting, it streams a status table about once per second. The wait ends early in two cases. The workers
-keep running in both:
+While waiting, it streams a status table about once per second. The wait ends early in three cases. The workers
+keep running in all of them:
 
 - **You type a message** (outcome `interrupted`). The wait checks `ctx.hasPendingMessages()` on each 400 ms poll.
   It returns in under 1 s, and the manager then reads your message. It can pass the message on with `worker_send`.
 - **You press `Esc`** (outcome `aborted`).
+- **A [health check](#health-checks) alerts about a waited-for worker** (outcome `stalled`). The result starts
+  with `Wait stopped early: the health check found N worker(s) that may be stuck`, then each one's headline and what
+  to do. The alert comes with the wait instead of as a separate message. Only a new alert counts: a worker that was
+  already flagged when the wait began stops it at its next repeat alert.
 
 On timeout, interrupt or cancel, finished workers are reported and running ones are listed with their current
 activity. Running workers auto-notify later. The same early return applies to `worker_spawn` and `worker_send`
@@ -87,8 +92,10 @@ with `wait: true`.
 | `name` | string | none | Without it: the [status table](#status-table) with its legend, plus the run directory. With it: a detailed report. |
 
 The detailed report contains: status table and legend · model, thinking level, task count, pid · session file · log file ·
-latest thinking (if busy) · last 15 transcript entries (240 chars each) · last result (if not busy). It is truncated
-to 40 KB.
+health line (if busy: verdict, time since the last output, time since the last status check reply) · latest thinking
+(if busy) · last 15 transcript entries (240 chars each) · last result (if not busy). It is truncated to 40 KB.
+Without a name, the table is followed by the run directory (`logs: …`) and the health check settings
+(`health checks: every 10s while workers run · …`).
 
 ### `worker_stop`
 
@@ -185,7 +192,7 @@ The default status format, since v0.3.0. `worker_status`, the `worker_wait` prog
 | ↓Out | Output tokens, thinking included, summed | `usage.output` |
 | Cost | USD, summed | `usage.cost.total` |
 | Time | Time used by the current task (or the last one, when done) | `taskStartedAt` |
-| Now | Current activity while busy; the error text on `error` or `crashed`. The widget shows `→ result` when done | `activity` |
+| Now | Current activity while busy, after a `⚠` [health warning](#health-checks) if there is one; the error text on `error` or `crashed`. The widget shows `→ result` when done | `activity`, `health` |
 
 Turns, Tools, ↑In, ↓Out and Cost add up over the **whole life** of the worker. They are not reset per task. Time
 is per task.
@@ -248,9 +255,54 @@ Right and middle clicks are not used. A drag is not used, so pi's text selection
 | `crashed` | ✗ | crashed | Process exited unexpectedly; `errorMessage` holds the exit reason and stderr tail |
 | `interrupted` | ↯ | interrupted | Restored when the manager session was reopened: the worker was busy when pi quit. No process; see [`worker_resume`](#worker_resume) |
 
+A health warning (`⚠ quiet 3m05s`, `⚠ not answering`, `⚠ loop ×5`) is not a status: the worker stays `running`.
+See [Health checks](#health-checks).
+
 `idle`, `error` and `aborted` workers are alive and accept `worker_send`. `stopped` and `crashed` workers do not;
 spawn a new one (the same name can be reused). `interrupted` workers are resumed with `worker_resume`; `worker_send`
 refuses them with a hint.
+
+## Health checks
+
+Since v0.8.0 the manager follows up on running workers by itself (`health.ts`). While at least one worker
+is busy, it checks every busy worker every `PI_MULTI_AGENT_HEALTH_INTERVAL` seconds (default **10**). A check costs no
+model tokens:
+
+1. **Heartbeat.** One RPC `get_state` to the worker, with a timeout of `min(5 s, interval)`. pi answers it at once,
+   even mid task, so a missing reply means the process is blocked or hung. The reply's `isStreaming` and
+   `isCompacting` are kept. Heartbeat replies are not written to `<name>.events.jsonl`.
+2. **Verdict**, from the heartbeat and what the worker already tracks, worst first:
+
+| Verdict | When | Warning in Now | Alerted |
+|---|---|---|---|
+| `unresponsive` | 3 heartbeats in a row got no reply | `⚠ not answering` | yes |
+| `waiting` | a dialog from the worker waits for your answer | none (the activity says `waiting for you: …`) | no: only you can answer it |
+| `looping` | 5 tool calls in a row with the same tool and the same arguments | `⚠ loop ×n` | yes |
+| `quiet` | no event from the worker for `PI_MULTI_AGENT_STALL_SECONDS` (default **180**) | `⚠ quiet 3m05s` | yes |
+| `ok` | otherwise | none | |
+
+"Event" means any session event, streaming deltas included, or a dialog or notification from the worker. Heartbeat
+replies do not count. A long tool call without output (`sleep`, a quiet build) or a model that thinks without
+streaming are quiet too: the alert says what the worker is doing, and the manager decides.
+
+3. **Alert**, on a new problem:
+   - you get a toast: `Worker <name> may be stuck (quiet): no output for 3m02s; now: bash $ npm run dev; …`;
+   - the manager LLM gets a message (`customType: "multi-agent-health"`, `deliverAs: "followUp"`,
+     `triggerTurn: true`, shown as `⚠ worker <name> may be stuck (…)`). It holds the headline, the worker's status
+     table row, the settings, and what to do for that verdict (inspect with `worker_status`; leave a legitimately
+     long step running; abort a hung tool call and re-instruct, because steering arrives only after the current
+     step; kill a process that does not answer), and asks the manager to tell you what it found and did.
+   - No message when the worker has `notify: false` (`worker_wait` and `worker_status` show the health instead), or
+     when a `worker_wait` waits on it (the wait returns `stalled` instead).
+
+While the problem lasts, it is alerted again (`is still stuck`) each time it has lasted about twice as long, at least
+`PI_MULTI_AGENT_STALL_SECONDS` and 60 s apart: with the defaults at 3, 6, 12, 24 … minutes of quiet. A new problem
+(another verdict, a new quiet period, a new loop) alerts at once. When an alerted worker moves again you get a toast
+`Worker <name> is making progress again`; the manager gets nothing until the result. The warning in the table goes
+away as soon as the worker sends an event, before the next check. Health state resets when a task starts or settles.
+
+`PI_MULTI_AGENT_HEALTH_INTERVAL=0` (or `off`) turns the checks off; `PI_MULTI_AGENT_STALL_SECONDS=0` turns only the
+quiet verdict off.
 
 ## Files
 
@@ -295,6 +347,7 @@ in the pi docs), made more compact:
 | Event | Stored as |
 |---|---|
 | `message_update`, `tool_execution_update` | dropped (high-volume streaming deltas; they are in the `.log` and the session file) |
+| `response` to a health check heartbeat (`get_state`) | dropped (one every 10 s per busy worker) |
 | `message_start` | `{type, role}` |
 | `message_end` (system message) | `{type, role: "system"}` |
 | `message_end` (other roles) | full event: the complete message, including thinking blocks and usage |
@@ -339,6 +392,8 @@ These are read when the manager loads the extension.
 | `PI_MULTI_AGENT_DIR` | `<pi agent dir>/multi-agent` | Root for run directories and worker sessions |
 | `PI_MULTI_AGENT_WORKER_SESSION_DIR` | `<multi-agent dir>/sessions` | Where new workers store their sessions |
 | `PI_MULTI_AGENT_WORKER_ARGS` | none | Extra CLI args for every worker, split on whitespace (no quoting). E.g. `--no-session`, `--session-dir /path`, `--no-extensions` |
+| `PI_MULTI_AGENT_HEALTH_INTERVAL` | `10` | Seconds between [health checks](#health-checks) of busy workers. Fractions allowed; below 1 becomes 1. `0` or `off` turns health checks off. Invalid values use the default |
+| `PI_MULTI_AGENT_STALL_SECONDS` | `180` | Seconds without any event before a busy worker counts as `quiet` and the manager is alerted. `0` or `off` turns only this verdict off |
 
 Set by the extension on worker processes:
 
@@ -355,6 +410,11 @@ Set by the extension on worker processes:
 | Worker startup (first `get_state` response) | 120 s |
 | RPC command response (prompt, steer, follow_up) | 60 s |
 | Abort | 30 s |
+| Health check interval | 10 s (`PI_MULTI_AGENT_HEALTH_INTERVAL`) |
+| Health check heartbeat (`get_state`) reply | `min(5 s, interval)`; 3 unanswered in a row = `unresponsive` |
+| Quiet after | 180 s without events (`PI_MULTI_AGENT_STALL_SECONDS`) |
+| Loop | 5 identical tool calls in a row |
+| Repeat alerts | when the problem has lasted about twice as long; at least the stall time and 60 s apart |
 | Default `worker_wait` / `wait: true` timeout | 1800 s |
 | Tool result size | 40 KB (shared across reported workers, ≥ 2 KB each) |
 | In-memory transcript (viewer) | last 400 entries, 20,000 chars per entry (the `.log` keeps everything) |

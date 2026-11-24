@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.0 — 2026-11-25
+
+Health checks. The manager notices stuck workers and follows up on them by itself.
+
+### Added
+
+- While at least one worker runs, the manager checks every busy worker every 10 s. Set the interval with
+  `PI_MULTI_AGENT_HEALTH_INTERVAL` (seconds; `0` or `off` turns checks off). A check costs no model tokens: one
+  `get_state` heartbeat to the worker process plus a look at its last event and its recent tool calls.
+- Verdicts: **quiet** (no event for `PI_MULTI_AGENT_STALL_SECONDS`, default 180), **not answering** (3 heartbeats
+  in a row without a reply), **loop** (5 identical tool calls in a row). A worker that waits for your answer to a
+  dialog is never flagged.
+- On a problem: a warning toast; `⚠ quiet 3m05s` / `⚠ not answering` / `⚠ loop ×5` before the activity in the
+  widget, the status table and the viewer, plus `N may be stuck` in the widget summary; and an alert message to the
+  manager LLM (`multi-agent-health`, follow-up that starts a turn) with what to do for that verdict. Shown in the TUI
+  as `⚠ worker <name> may be stuck (…)`. The alert repeats while the problem lasts, each time it has lasted about
+  twice as long (3, 6, 12 … min). A toast tells you when the worker moves again.
+- `worker_wait` (and `wait: true`) ends early with outcome `stalled` when a waited-for worker gets an alert, instead of
+  blocking until the timeout.
+- `worker_status` shows the health settings; `worker_status <name>` a `health:` line. A prompt guideline tells the
+  manager to follow up on alerts and tell the user.
+- `health.ts`; `scripts/test-health.ts` (Runbook T13, 33 checks, no model calls: the script also plays a fake RPC
+  worker that goes quiet, freezes or loops); `scripts/test-health-live.ts` (T14).
+
+### Changed
+
+- Heartbeat replies are not written to `<name>.events.jsonl`.
+- `scripts/lib/pi-packages.ts` also resolves `typebox`, so tests can import `index.ts`.
+
+### Tested
+
+- T13: 33 of 33 PASS. T1, T10, T11, T12 still pass.
+- T14 with `claude-code/claude-haiku-5-5`: the alert came 15 s after the worker went silent; the manager called
+  `worker_status` on its own, judged the `sleep 120` legitimate, left it running and told the user. No orphans.
+- Interactive TUI (tmux, fullscreen): the `⚠` warning and `1 may be stuck` in the widget, the rendered alert
+  message, a repeat alert, and the warning clearing when the worker finished.
+
 ## 0.7.0 — 2026-11-24
 
 Resume after pi quits. Worker processes still stop with the manager, but their work can be continued.

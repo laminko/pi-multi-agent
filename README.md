@@ -39,6 +39,10 @@ The widget above the editor shows every worker, with its latest thinking (💭):
 
 Type `/workers` for a live view of one worker: its thinking, output and tool calls.
 
+You don't need to watch for stuck workers. The manager checks running workers every 10 s; when one goes silent,
+stops answering or loops, you see `⚠` in the widget and the manager follows up on it by itself.
+`PI_MULTI_AGENT_HEALTH_INTERVAL` changes the interval.
+
 ## If pi quits
 
 Reopen with `pi -c` and type `/workers-resume`. Interrupted workers continue where they stopped.

@@ -36,6 +36,9 @@ commands that run `scripts/…` or `./extensions/…` assume a clone of the repo
 | Test: widget and viewer with many workers (no model calls) | `node scripts/test-ui-overflow.ts` (T10) |
 | Test: result blocks parse and render (no model calls) | `node scripts/test-render-report.ts` (T11) |
 | Test: resume records and session repair (no model calls) | `node scripts/test-resume.ts` (T12) |
+| Test: health checks, with fake worker processes (no model calls) | `node scripts/test-health.ts` (T13) |
+| Test: the manager follows up on a stuck worker | `node scripts/test-health-live.ts` (T14) |
+| Health check settings (set before starting pi) | `PI_MULTI_AGENT_HEALTH_INTERVAL=10` (s; `0` = off), `PI_MULTI_AGENT_STALL_SECONDS=180` |
 | **pi quit while workers ran** | `pi -c`, then `/workers-resume` ([details](#recovering-after-pi-quits)) |
 
 ## Prerequisites
@@ -120,8 +123,10 @@ No model calls.
   | jq -c 'select(.type=="response") | [.data.commands[] | select(.source=="extension") | .name]'
 ```
 
-**Expected:** the list starts with `"workers","worker-send","worker-stop","workers-legend","workers-clear"`. The rest come from your
-other extensions. If it fails, run the same command without `2>/dev/null` and read the extension error.
+**Expected:** the list starts with `"workers","worker-send","worker-stop","workers-legend","workers-resume","workers-clear"`.
+The rest come from your other extensions. If it fails, run the same command without `2>/dev/null` and read the
+extension error. If pi-multi-agent is also installed, the two copies conflict (`Tool "worker_spawn" conflicts`): add
+`--no-extensions` before `-e` to load only this checkout.
 
 ### T2. Worker RPC layer
 
@@ -229,7 +234,7 @@ Free, 1 s. No model calls: the workers are fakes rendered with pi's real TUI fun
 node scripts/test-ui-overflow.ts        # add -v to print the rendered widget and tab bars
 ```
 
-**Expected:** 18 `PASS` lines and `all passed`. They cover the widget row order, the `… N more (…)` line,
+**Expected:** 21 `PASS` lines and `all passed`. They cover the widget row order, the `… N more (…)` line,
 `PI_MULTI_AGENT_WIDGET_ROWS`, widget clicks, and the viewer tab window at widths 120, 80 and 60 (current tab and
 counter always visible, markers only where tabs are hidden, marker clicks). The script finds pi's packages through the
 `pi` on `PATH`; if that fails, set `PI_NODE_MODULES` to the `node_modules` directory that contains
@@ -278,6 +283,43 @@ When its log shows `▶ bash $ sleep 25`, close the terminal (or `tmux kill-serv
 4. Repeat the quit, then ask in plain words (`My workers got interrupted. Please continue them.`): the manager calls
    `worker_resume`, and a single `worker_wait` returns the result.
 
+### T13. Health checks
+
+Free, 15 s. No model calls: the script also plays the worker (`--mode rpc`), so the extension runs real child
+processes that go quiet, freeze, or loop on purpose.
+
+```bash
+node scripts/test-health.ts
+```
+
+**Expected:** 33 `PASS` lines and `all passed`: settings from the environment (defaults, values, `0`/`off`, junk);
+verdicts (ok, quiet, unresponsive before quiet, a dialog is `waiting`, loop, "no run in progress"); alert timing (3,
+6, then not before 12 minutes; recovery keeps the count); the `⚠` warning in the table and widget, and that it goes
+with the next event; the alert text. Then the extension, loaded with a mocked pi API, a 1 s interval and a 2 s stall:
+a quiet, a frozen and a looping worker each produce one alert message (`followUp`, `triggerTurn`) and a toast;
+`worker_status` shows the warnings and the settings; heartbeat replies stay out of `<name>.events.jsonl`; a
+`wait: true` spawn returns `stalled` within a few seconds and no separate message; the alert view renders; the
+warning goes after an abort; no process is left after shutdown.
+
+### T14. The manager follows up on a stuck worker
+
+About $0.02 with haiku, 30 s.
+
+```bash
+TEST_EXTENSIONS=~/.pi/agent/git/github.com/earendil-works/pi-claude-code node scripts/test-health-live.ts
+```
+
+The manager loads this checkout's extension and nothing else that is installed (`--no-extensions`, so an installed
+pi-multi-agent cannot conflict); add the provider package of your model to `TEST_EXTENSIONS` (`:`-separated), or pass
+a model that needs none as the first argument. It checks every 2 s and calls a worker quiet after 15 s; the worker
+runs `sleep 120`.
+
+**Expected:** about 15 s after the worker starts its `sleep`, a toast `Worker sleeper may be stuck (quiet): no output
+for 16s; now: bash $ sleep 120; its process still answers status checks` and the same alert to the manager; the
+manager starts a turn by itself, calls `worker_status` (or `worker_stop` / `worker_send`) and reports what it found;
+`PASS`. A model that refuses the pointless `sleep` or writes its tool call as text (seen with
+`claude-local/claude-haiku-4-5`) finishes in seconds and fails the test; use another model.
+
 ## Operating a session
 
 **Start.** Open pi with the extension, and ask the manager to delegate. Tips for good worker tasks are in the
@@ -288,6 +330,8 @@ When its log shows `▶ bash $ sleep 25`, close the terminal (or `tmux kill-serv
 - `/workers`: full live transcript of one worker.
 - From a second terminal: `scripts/watch.sh` (tails all `.log` files of the latest run).
 - Ask the manager: *"what is each worker doing?"*. It calls `worker_status`.
+- Nothing, for stuck workers: the manager's health checks flag them (`⚠` in the widget, a toast) and the manager
+  follows up by itself. See [Observability](docs/observability.md#stuck-workers-health-checks).
 
 **Intervene.**
 
@@ -342,6 +386,10 @@ First look at the worker's files: `~/.pi/agent/multi-agent/latest/<name>.log` (w
 | `Failed to load extension … Tool "worker_spawn" conflicts with …` | The extension is loaded twice: an installed package plus `-e`, or two installs | Keep one copy: check `pi list`, then `pi remove` the extra one, or drop the `-e` |
 | `Too many live workers (8/8)` | Limit reached; idle workers count too | Kill idle workers (`/worker-stop <name> kill`) or set `PI_MULTI_AGENT_MAX_WORKERS` before starting pi |
 | Worker shows `waiting for model` for a long time | Provider latency, rate limits, or a very large context | Look in `<name>.log` for `• retry …` lines. Steer with a narrower task, or abort and respawn on another model |
+| `⚠ quiet …` / "may be stuck" alerts for workers that are fine | Long silent steps (builds, tests, `sleep`) or a model that thinks without streaming | The manager normally leaves them running. Raise `PI_MULTI_AGENT_STALL_SECONDS` (e.g. `600`) before starting pi |
+| Too many health alerts in the manager's conversation | Many workers in long silent steps | Raise `PI_MULTI_AGENT_STALL_SECONDS`, spawn with `notify: false` (alerts then show only in toasts and `worker_status`), or set `PI_MULTI_AGENT_HEALTH_INTERVAL=0` to turn checks off |
+| `⚠ not answering` | The worker's pi process does not answer status checks: blocked or hung | Kill it (`/worker-stop <name> kill`; the manager usually does this itself) and respawn. Its `<name>.log` and session file show how far it got |
+| A stuck worker is never flagged | Health checks off (`PI_MULTI_AGENT_HEALTH_INTERVAL=0`), or it waits for your answer to a dialog (never flagged) | `worker_status` without a name prints the `health checks:` settings line; answer the `[worker <name>]` dialog |
 | Worker shows `waiting for you: …` | An extension inside the worker opened a dialog | Answer the `[worker <name>] …` dialog in the manager UI. In print mode dialogs are auto-cancelled |
 | <a id="no-thinking-shown"></a>No thinking shown | The model has no thinking, the level is `off`, or the model chose not to think (adaptive) | Check with `jq -c 'select(.type=="message_end" and .message.role=="assistant") \| [.message.content[].type]' <name>.events.jsonl`. Use a thinking-capable model and level (`thinking: "high"`). See [observability.md](docs/observability.md#thinking) |
 | Widget not visible | No workers yet, the viewer is open, or the manager runs without a UI (print mode) | Spawn a worker. Close the viewer. In RPC hosts the widget is plain text |
