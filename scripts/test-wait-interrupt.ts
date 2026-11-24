@@ -2,6 +2,7 @@
  * End-to-end test: the user can talk to the manager while worker_wait runs.
  *
  *   node scripts/test-wait-interrupt.ts [model]
+ *   TEST_MODE=follow_up node scripts/test-wait-interrupt.ts   # Alt+Enter path; default steer
  *
  * Starts a manager pi in RPC mode, makes it spawn a worker that sleeps 60 s and
  * then call worker_wait. When worker_wait starts, the test sends a steer message
@@ -12,6 +13,7 @@ import { spawn } from "node:child_process";
 import * as readline from "node:readline";
 
 const model = process.argv[2] ?? "claude-code/claude-haiku-5-5";
+const mode = process.env.TEST_MODE === "follow_up" ? "follow_up" : "steer";
 const args = ["--mode", "rpc", "--no-session", "--model", model, "--thinking", "off"];
 const pi = spawn("pi", args, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env } });
 const send = (o: object) => pi.stdin.write(`${JSON.stringify(o)}\n`);
@@ -46,8 +48,8 @@ readline.createInterface({ input: pi.stdout }).on("line", (line) => {
 		waitStart = Date.now();
 		setTimeout(() => {
 			steerSent = Date.now();
-			send({ type: "steer", message: "Master here: just say OK, then stop." });
-			console.log(`[steer] sent ${steerSent - waitStart} ms after worker_wait started`);
+			send({ type: mode, message: "Master here: just say OK, then stop." });
+			console.log(`[${mode}] sent ${steerSent - waitStart} ms after worker_wait started`);
 		}, 3000);
 	}
 	if (ev.type === "tool_execution_end" && ev.toolName === "worker_wait" && waitStart) {
@@ -67,7 +69,7 @@ readline.createInterface({ input: pi.stdout }).on("line", (line) => {
 send({
 	type: "prompt",
 	message:
-		'Test of the multi-agent extension. Do exactly these 2 steps and nothing else. ' +
+		'Test of the multi-agent extension. I ask you to wait in step 2. Do exactly these 2 steps and nothing else. ' +
 		'1) Call worker_spawn with name "sleeper", tools "bash", task "Run the bash command: sleep 60. Then reply done." ' +
 		'2) Then call worker_wait with names ["sleeper"] and timeoutSeconds 120.',
 });

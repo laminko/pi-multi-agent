@@ -216,7 +216,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 		// Tell the user at once, even while the manager is busy with another turn.
 		try {
 			if (uiCtx?.hasUI) {
-				const ok = w.status === "done";
+				const ok = w.status === "idle"; // "idle" is the settled-OK status; its label is "done"
 				uiCtx.ui.notify(`Worker ${w.name} ${STATUS_LABEL[w.status]}`, ok ? "info" : "warning");
 			}
 		} catch {
@@ -447,7 +447,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 		promptSnippet: "Delegate a self-contained task to a parallel worker pi agent",
 		promptGuidelines: [
 			"Use worker_spawn to delegate independent subtasks (research, review, implementation of separate areas) to parallel worker agents; give each worker complete context, file paths, constraints and the expected output format, because workers cannot see this conversation.",
-			"After starting workers with worker_spawn, end your turn: tell the user which workers run and that you will report each result. Results arrive automatically, and the user can talk to you meanwhile. Call worker_wait only when the user asks you to wait. Never poll worker_status in a loop.",
+			"After starting workers with worker_spawn, end your turn: tell the user which workers run and that you will report each result. Results arrive automatically, and the user can talk to you meanwhile. Use worker_wait, or wait=true on worker_spawn/worker_send, only when the user asks you to wait. Never poll worker_status in a loop.",
 			"When a worker result message arrives, report it to the user in a short summary.",
 			"Do not let two workers started with worker_spawn edit the same files at the same time; split work by file or module.",
 		],
@@ -473,7 +473,11 @@ export default function multiAgent(pi: ExtensionAPI) {
 				}),
 			),
 			cwd: Type.Optional(Type.String({ description: "Working directory for the worker. Default: the manager's cwd." })),
-			wait: Type.Optional(Type.Boolean({ description: "Block until the worker finishes and return its result. Default false." })),
+			wait: Type.Optional(
+				Type.Boolean({
+					description: "Block until the worker finishes and return its result. Default false. Only when the user asks you to wait.",
+				}),
+			),
 			notify: Type.Optional(
 				Type.Boolean({
 					description: "Send you the result automatically when the worker finishes and nobody is waiting on it. Default true.",
@@ -490,7 +494,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			await worker.prompt(params.task);
 			if (!params.wait) {
 				const notifyText = worker.config.notify
-					? "Do not wait. The result is sent to you automatically when it finishes. End your turn or continue other work."
+					? "The result is sent to you automatically when it finishes. Unless the user asked you to wait, do not wait: end your turn or continue other work."
 					: "notify=false: call worker_wait or worker_status to get the result.";
 				return {
 					content: [

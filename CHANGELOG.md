@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.1 — 2026-11-24
+
+### Fixed
+
+- The toast for a finished worker showed as `Warning:`. The code compared the status to `"done"`, but that word is
+  only the label. The settled-OK status is `"idle"`. The toast is now `info` for done, and `warning` for the other
+  statuses.
+- In 1 of 2 T8 runs, the manager blocked with `wait: true` on `worker_spawn`, instead of with `worker_wait`. The
+  guideline, the `wait` parameter text and the spawn result now all say: wait only when the user asks.
+
+### Tested
+
+- Follow-up (`Alt+Enter`) interrupt: `TEST_MODE=follow_up` for T7. Result: 3 of 3 `interrupted`, 210 ms each.
+- Interactive TUI in tmux (RUNBOOK T9). Enter interrupt: 463 ms. Alt+Enter interrupt: 490 ms. The toast showed at
+  info level, and the auto-report arrived.
+- Regression: T7 × 3, T7 follow-up × 3, T8 × 3, for a total of 9 of 9 PASS.
+- T8 now counts `wait: true` as a blocking wait.
+
 ## 0.2.0 — 2026-11-24
 
 Non-blocking manager. You can talk to the manager while workers run.
@@ -29,7 +47,7 @@ So you could not reach the manager, and you could not steer workers through it.
 
 - No new tool parameters. `notify: false` still means "collect with `worker_wait` or `worker_status`".
 - No change to `worker.ts`, `ui.ts` or `format.ts`.
-- Not tested: a `followUp` message (`Alt+Enter`), and the interactive TUI. Both tests ran over RPC.
+- Not tested in 0.2.0: a `followUp` message (`Alt+Enter`), and the interactive TUI. Both were tested in 0.2.1.
 
 ## 0.1.0 — 2026-11-24
 
