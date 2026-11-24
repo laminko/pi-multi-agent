@@ -21,6 +21,7 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Install for all sessions | `pi install /path/to/pi-multi-agent` |
 | Watch workers live (in pi) | `/workers` or `/workers <name>` |
 | Watch from another terminal | `scripts/watch.sh [name]` |
+| Status table and column legend (in pi) | `/workers-legend` |
 | Message / steer a worker | `/worker-send <name> <message>` or viewer `m` |
 | Abort a worker's task | `/worker-stop <name>` or viewer `a` |
 | Kill one / all workers | `/worker-stop <name> kill` / `/worker-stop all kill` |
@@ -95,7 +96,7 @@ No model calls.
   | jq -c 'select(.type=="response") | [.data.commands[] | select(.source=="extension") | .name]'
 ```
 
-**Expected:** the list starts with `"workers","worker-send","worker-stop","workers-clear"`. The rest come from your
+**Expected:** the list starts with `"workers","worker-send","worker-stop","workers-legend","workers-clear"`. The rest come from your
 other extensions. If it fails, run the same command without `2>/dev/null` and read the extension error.
 
 ### T2. Worker RPC layer

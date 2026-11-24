@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.2.1 |
+| **Version** | 0.3.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -15,7 +15,8 @@
 | Manager tools | ✅ Done · mostly verified | `worker_spawn`, `worker_wait`, `worker_status` used by a real manager LLM. `worker_send` was verified for idle workers only. `worker_stop` was not driven by an LLM yet (its underlying abort/stop is verified) |
 | Auto-notify | ✅ Done · verified | The result is delivered and the manager reacts on its own. A user toast shows for each finished worker (V15) |
 | Non-blocking manager | ✅ Done · verified | The manager does not wait after a spawn (V15). Typing ends a `worker_wait` in < 1 s (V14) |
-| Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts |
+| Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20) |
+| Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message. The `a`/`k` keys were not exercised |
 | Slash commands | ⚠️ Partly verified | `/workers` verified; `/worker-send`, `/worker-stop` and `/workers-clear` not exercised |
 | Logs, result files, event log | ✅ Done · verified | Event log compaction verified (40 KB → 14 KB) |
@@ -48,6 +49,9 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V16 | Interrupt with a follow-up message | `TEST_MODE=follow_up` T7, 3 runs | ✅ 3 of 3 `interrupted`, 210 ms each |
 | V17 | Interactive TUI: steer and Alt+Enter interrupt, toast, auto-report | tmux, haiku (T9) | ✅ Enter: wait text shown 463 ms after the keypress; Alt+Enter: 490 ms; the manager answered both; toast `Worker s3 done` at info level; `⚑ worker s3 done` reported |
 | V18 | Regression after 0.2.1 prompt fix | T7 × 3, T7 follow-up × 3, T8 × 3 | ✅ 9 of 9 PASS (T8 now also counts `wait: true`) |
+| V19 | Status table rendering | `statusTable` with fake workers: running with 2 failed tools and 1 queued; crashed | ✅ Columns align; `37 (2✗)`, `(+1 queued)`, the error text in Now; the legend follows |
+| V20 | Table in the TUI | tmux, 2 workers, `worker_status` and `/workers-legend` | ✅ Widget header and rows align; `/workers-legend` shows the table and 11 legend lines |
+| V21 | Regression after 0.3.0 | T1, T7, T7 follow-up, T8 | ✅ T1 5 commands incl. `workers-legend`; T7 210 ms; follow-up 213 ms; T8 0 waits, 1 toast |
 
 ## Not yet verified
 
@@ -121,5 +125,7 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   could not steer workers through the manager. Fix: the wait returns `interrupted` on a pending user message; the
   manager is told not to wait after a spawn; each finished worker shows a toast. Verified V14 and V15.
   Added `INDEX.md` and `CHANGELOG.md`.
+- v0.3.0. The status table with a legend is the default status format, and there is a new `/workers-legend`
+  command. Verified V19–V21.
 - v0.2.1. Verified the follow-up path (V16) and the interactive TUI (V17). Found and fixed 2 defects: the done
   toast showed as a warning, and in 1 of 2 T8 runs the manager used `wait: true` on `worker_spawn`. Verified V18.

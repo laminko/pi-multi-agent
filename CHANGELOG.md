@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.0 — 2026-11-24
+
+Status table with a legend is the default status format.
+
+### Changed
+
+- `worker_status` (no name), the `worker_wait` progress, and `/workers` without a TUI now print an aligned table.
+  The table is valid markdown, and the legend follows it. Columns: St, Worker, Turns, Tools, Ctx, ↑In, ↓Out, Cost,
+  Time, Now.
+- Result blocks (`<worker …>`) and the `worker_status <name>` report use the same table. Result blocks omit the
+  legend, to save tokens.
+- The TUI widget uses the same column names with a header row. Its `Now` column is the live preview.
+- The `worker_status` description tells the manager to show the table and the legend as they are.
+
+### Added
+
+- `/workers-legend`: shows the table and the meaning of each column.
+- `format.ts`: `statusTable`, `statusCells`, `STATUS_LEGEND`.
+
+### Removed
+
+- `statusLine` (the old one-line format). `statsText` stays for the `/workers` viewer header.
+
+### Not changed
+
+- Counters still add up over the whole life of the worker. Only Time is per task. The legend says this.
+- Worker names are still chosen by the manager. There is no automatic `worker-N` naming.
+
 ## 0.2.1 — 2026-11-24
 
 ### Fixed
