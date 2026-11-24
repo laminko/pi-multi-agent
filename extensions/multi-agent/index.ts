@@ -128,7 +128,10 @@ export default function multiAgent(pi: ExtensionAPI) {
 				if (widgetMode !== "component") {
 					ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => {
 						widgetTui = tui;
-						return createWidgetComponent(registry, theme);
+						return createWidgetComponent(registry, theme, (name) => {
+							const c = uiCtx;
+							if (c && !viewerOpen) void openViewer(c, name).catch(() => undefined);
+						});
 					});
 					widgetMode = "component";
 				}

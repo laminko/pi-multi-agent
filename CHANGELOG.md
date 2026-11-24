@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.4.0 — 2026-11-24
+
+Mouse support in pi's fullscreen mode. Every mouse action also has a key.
+
+### Added
+
+- Widget: a left click on a worker row opens `/workers` on that worker. A click on the summary or the header opens
+  it on the first worker.
+- Viewer: the first line is now a tab bar with one tab per worker. Click a tab to switch.
+- Viewer: the wheel scrolls the transcript.
+- Viewer: the actions on the help line can be clicked: `End follow`, `m message`, `a abort`, `k kill`, `esc close`.
+
+### Tested
+
+- Unit checks with fake mouse events: 7 of 7 PASS. They cover the widget row, the summary, a right click
+  (ignored), a tab click, the wheel, `End follow` and `m message`.
+- Live in tmux, fullscreen, with SGR mouse sequences: 3 of 3. A row click opened `worker-2`, a tab click switched to
+  `worker-1`, and a click on `esc close` closed the viewer.
+
+### Not changed
+
+- Regular mode (`tuiMode: "regular"`): pi does not send mouse events, so the keys stay the only way.
+- RPC hosts (pi-web): the widget is plain text, so it has no clicks.
+
 ## 0.3.0 — 2026-11-24
 
 Status table with a legend is the default status format.

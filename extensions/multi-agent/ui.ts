@@ -13,6 +13,15 @@ type ThemeLike = {
 	italic(text: string): string;
 };
 type KeybindingsLike = { matches(data: string, id: string): boolean };
+/** Subset of pi-tui's TuiMouseEvent. Coordinates are zero-based and local to the component. */
+type MouseEventLike = { type: string; button: string; x: number; y: number; wheelDelta?: number };
+type MouseResult = { handled?: boolean; render?: boolean } | undefined;
+
+const isLeftClick = (e: MouseEventLike) => e.type === "click" && e.button === "left";
+
+/** A clickable span on one rendered line: columns [x0, x1). */
+type HitSpan<T> = { x0: number; x1: number; value: T };
+const hit = <T>(spans: HitSpan<T>[], x: number): T | undefined => spans.find((s) => x >= s.x0 && x < s.x1)?.value;
 type TuiLike = { requestRender(force?: boolean): void };
 
 export interface WorkerSource {
@@ -64,6 +73,8 @@ function preview(w: Worker, theme: ThemeLike, max: number): string {
 // ------------------------------------------------------------------ widget
 
 const MAX_WIDGET_ROWS = 8;
+/** Widget line layout: 0 = summary, 1 = column header, 2.. = one row per shown worker. */
+const WIDGET_FIRST_ROW = 2;
 
 export function widgetLines(source: WorkerSource, width: number, theme: ThemeLike = plainTheme): string[] {
 	const workers = source.list();
@@ -106,10 +117,21 @@ export function widgetLines(source: WorkerSource, width: number, theme: ThemeLik
 	return lines.map((l) => truncateToWidth(l, width));
 }
 
-export function createWidgetComponent(source: WorkerSource, theme: ThemeLike) {
+/**
+ * Widget component. In fullscreen mode a left click opens the viewer:
+ * on a worker row, on that worker; on the summary or column header, on the first worker.
+ */
+export function createWidgetComponent(source: WorkerSource, theme: ThemeLike, onOpen?: (name?: string) => void) {
 	return {
 		render(width: number): string[] {
 			return widgetLines(source, width, theme);
+		},
+		handleMouse(event: MouseEventLike): MouseResult {
+			if (!onOpen || !isLeftClick(event)) return undefined;
+			const shown = source.list().slice(0, MAX_WIDGET_ROWS);
+			const row = event.y - WIDGET_FIRST_ROW;
+			onOpen(row >= 0 && row < shown.length ? shown[row]!.name : undefined);
+			return { handled: true, render: false };
 		},
 		invalidate() {},
 	};
@@ -173,6 +195,10 @@ export function createViewer(
 	let cache = new WeakMap<TranscriptEntry, CachedLines>();
 	let renderTimer: ReturnType<typeof setTimeout> | undefined;
 	let closed = false;
+	// Clickable spans from the last render: the tab bar (line 0) and the help line (last line).
+	let tabSpans: HitSpan<string>[] = [];
+	let helpSpans: HitSpan<"message" | "abort" | "kill" | "close" | "follow">[] = [];
+	let lineCount = 0;
 
 	const onChange = () => {
 		if (renderTimer || closed) return;
@@ -214,8 +240,25 @@ export function createViewer(
 			const rows = process.stdout.rows || 40;
 			bodyHeight = Math.max(6, rows - 10);
 
+			// Tab bar: one clickable tab per worker; the current one shows its status label.
+			tabSpans = [];
+			let tabBar = " ";
+			let x = 1;
+			for (const t of workers) {
+				const label = t === w ? ` ${t.name} ` : ` ${STATUS_ICON[t.status]} ${t.name} `;
+				const styled =
+					t === w
+						? `${theme.fg("accent", theme.bold(`[${label}]`))} ${statusBadge(t, theme)}`
+						: theme.fg(STATUS_COLOR[t.status], ` ${label} `);
+				const wTab = visibleWidth(styled);
+				tabSpans.push({ x0: x, x1: x + wTab, value: t.name });
+				tabBar += `${styled} `;
+				x += wTab + 1;
+			}
+			tabBar += theme.fg("dim", ` worker ${index + 1}/${workers.length}`);
+
 			const header = [
-				`${theme.fg("accent", theme.bold(` ${w.name}`))}  ${statusBadge(w, theme)}  ${theme.fg("dim", `worker ${index + 1}/${workers.length}`)}`,
+				tabBar,
 				theme.fg("muted", ` ${statsText(w)}${w.queued ? ` · ${w.queued} queued` : ""}`),
 				theme.fg("dim", ` ${w.model ?? "?"} (${w.thinkingLevel ?? "?"}) · log: ${w.logPath}`),
 				w.busy
@@ -246,11 +289,57 @@ export function createViewer(
 			while (body.length < bodyHeight) body.push("");
 
 			const rule = theme.fg("dim", "─".repeat(Math.max(1, width)));
-			const help = theme.fg(
-				"dim",
-				` ←/→ worker · ↑/↓ PgUp/PgDn scroll · End follow · m message · a abort · k kill · esc close${scroll ? `   ⏸ scrolled ${scroll}` : ""}`,
-			);
-			return [...header, rule, ...body, rule, help].map((l) => truncateToWidth(l, width));
+			// Help line: the action items are clickable.
+			helpSpans = [];
+			let help = theme.fg("dim", " ←/→ or click tab · ↑/↓ PgUp/PgDn wheel scroll · ");
+			const actions: [string, (typeof helpSpans)[number]["value"]][] = [
+				["End follow", "follow"],
+				["m message", "message"],
+				["a abort", "abort"],
+				["k kill", "kill"],
+				["esc close", "close"],
+			];
+			for (const [i, [text, value]] of actions.entries()) {
+				const x0 = visibleWidth(help);
+				help += theme.fg("muted", text);
+				helpSpans.push({ x0, x1: x0 + text.length, value });
+				if (i < actions.length - 1) help += theme.fg("dim", " · ");
+			}
+			if (scroll) help += theme.fg("dim", `   ⏸ scrolled ${scroll}`);
+			const out = [...header, rule, ...body, rule, help].map((l) => truncateToWidth(l, width));
+			lineCount = out.length;
+			return out;
+		},
+
+		/** Fullscreen mode only: click a tab to switch, click an action, wheel to scroll. */
+		handleMouse(event: MouseEventLike): MouseResult {
+			const w = current();
+			if (!w) return undefined;
+			if (event.type === "wheel" && event.wheelDelta) {
+				scroll = event.wheelDelta < 0 ? scroll - event.wheelDelta : Math.max(0, scroll - event.wheelDelta);
+				tui.requestRender();
+				return { handled: true };
+			}
+			if (!isLeftClick(event)) return undefined;
+			if (event.y === 0) {
+				const name = hit(tabSpans, event.x);
+				if (name && name !== currentName) {
+					currentName = name;
+					scroll = 0;
+					tui.requestRender();
+				}
+				return { handled: true };
+			}
+			if (event.y === lineCount - 1) {
+				const action = hit(helpSpans, event.x);
+				if (action === "follow") {
+					scroll = 0;
+					tui.requestRender();
+				} else if (action === "close") close({ action: "close" });
+				else if (action) close({ action, name: w.name });
+				return { handled: true };
+			}
+			return undefined;
 		},
 
 		handleInput(data: string): void {

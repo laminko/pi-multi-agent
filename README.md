@@ -38,7 +38,8 @@ While they run:
 
 - the **widget** above the editor shows each worker's status, turns, tool calls, cost, elapsed time, and its latest
   thinking (💭) or current tool (⟳);
-- **`/workers`** opens a live viewer with the full thinking, output and tool calls. `←/→` switches worker, `m` messages
+- **`/workers`** (or a click on a widget row) opens a live viewer with the full thinking, output and tool calls. A tab
+  click or `←/→` switches worker, `m` messages
   it, `a` aborts, `k` kills;
 - **`scripts/watch.sh`** follows the live logs from another terminal.
 

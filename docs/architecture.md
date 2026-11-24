@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.3.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.4.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
