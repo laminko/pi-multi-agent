@@ -22,11 +22,23 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { detailReport, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
 import { formatResultBlock, formatRunningBlock, renderReport } from "./report.ts";
+import {
+	INTERRUPTED_NOTE,
+	interruptedRecords,
+	mergeRecords,
+	oldProcessAlive,
+	RECORD_TYPE,
+	RESUME_PROMPT,
+	repairSession,
+	type WorkerRecord,
+} from "./resume.ts";
 import { createViewer, createWidgetComponent, type ViewerAction, widgetLines } from "./ui.ts";
-import { type DialogRequest, Worker, type WorkerHost } from "./worker.ts";
+import { type DialogRequest, type RecordEvent, Worker, type WorkerHost } from "./worker.ts";
 
 const WIDGET_KEY = "multi-agent";
 const MESSAGE_TYPE = "multi-agent";
+/** Hidden note to the manager LLM about interrupted workers (delivered with the next user prompt). */
+const NOTE_TYPE = "multi-agent-note";
 const MAX_LIVE_WORKERS = Number(process.env.PI_MULTI_AGENT_MAX_WORKERS) || 8;
 const RESULT_BUDGET_BYTES = 40_000; // per tool result, shared by the workers it reports on
 const DEFAULT_WAIT_SECONDS = 1800;
@@ -88,6 +100,29 @@ export default function multiAgent(pi: ExtensionAPI) {
 	registry.setMaxListeners(100);
 	const waiting = new Map<string, number>(); // worker name -> number of active waiters
 	const extraWorkerArgs = (process.env.PI_MULTI_AGENT_WORKER_ARGS ?? "").split(/\s+/).filter(Boolean);
+	const multiAgentRoot = () => process.env.PI_MULTI_AGENT_DIR || path.join(getAgentDir(), "multi-agent");
+	// New workers keep their sessions out of the project's session list, so `pi -c` / `pi -r` find the manager.
+	// Session flags in PI_MULTI_AGENT_WORKER_ARGS win.
+	const userSessionArgs = extraWorkerArgs.some((a) => a === "--session-dir" || a === "--no-session" || a === "--session");
+	const workerSessionDir = () =>
+		userSessionArgs
+			? undefined
+			: process.env.PI_MULTI_AGENT_WORKER_SESSION_DIR || path.join(multiAgentRoot(), "sessions");
+	/** Set in session_shutdown: stopping workers then is not a state change worth recording. */
+	let shuttingDown = false;
+	/** Last records of the workers restored as interrupted at session_start, by name. */
+	const interrupted = new Map<string, WorkerRecord>();
+	/** Tell the manager LLM about interrupted workers at the start of its next run (see before_agent_start). */
+	let interruptedNoteDue = false;
+	/** Names being resumed right now (a resume replaces the worker object). */
+	const resuming = new Set<string>();
+	/**
+	 * Working = busy, or about to be: starting up, or being resumed. A wait must not count these as finished; the
+	 * model often calls worker_wait in the same message as worker_spawn / worker_resume, and those run in parallel.
+	 */
+	const working = (w: Worker) => w.busy || w.status === "starting" || resuming.has(w.name);
+	/** The current worker of that name: a resume or respawn replaces the object while someone may hold the old one. */
+	const latest = (w: Worker) => registry.workers.get(w.name) ?? w;
 
 	let uiCtx: ExtensionContext | undefined;
 	let runDir: string | undefined;
@@ -144,7 +179,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 
 	function getRunDir(ctx: ExtensionContext): string {
 		if (runDir) return runDir;
-		const root = process.env.PI_MULTI_AGENT_DIR || path.join(getAgentDir(), "multi-agent");
+		const root = multiAgentRoot();
 		const stamp = new Date().toISOString().replace(/[:T]/g, "-").replace(/\..*$/, "");
 		const sid = (ctx.sessionManager.getSessionId() ?? "nosession").slice(0, 8);
 		runDir = path.join(root, "runs", `${stamp}-${sid}`);
@@ -232,8 +267,169 @@ export default function multiAgent(pi: ExtensionAPI) {
 	function register(worker: Worker): void {
 		worker.on("change", () => registry.emit("change"));
 		worker.on("settled", () => onSettled(worker));
+		worker.on("record", (event: RecordEvent) => recordWorker(worker, event));
 		registry.workers.set(worker.name, worker);
 		registry.emit("change");
+	}
+
+	// ------------------------------------------------------------ records and resume (see resume.ts)
+
+	/** Append the worker's state to the manager's session, so it can be resumed after pi quits. */
+	function recordWorker(w: Worker, event: RecordEvent): void {
+		if (shuttingDown) return;
+		const c = w.config;
+		const record: WorkerRecord = {
+			v: 1,
+			name: w.name,
+			status: w.status,
+			busy: w.busy,
+			at: Date.now(),
+			options: { cwd: c.cwd, model: c.model, thinking: c.thinking, tools: c.tools, role: c.role, notify: c.notify },
+			task: event.task,
+			sessionFile: w.sessionFile,
+			pid: w.pid,
+			logPath: w.logPath,
+		};
+		try {
+			pi.appendEntry(RECORD_TYPE, record);
+		} catch {
+			/* session gone */
+		}
+	}
+
+	/** Stop offering an interrupted worker for resume. */
+	function dismiss(w: Worker): void {
+		if (w.status !== "interrupted") return;
+		w.status = "stopped";
+		w.activity = "dismissed";
+		interrupted.delete(w.name);
+		recordWorker(w, {});
+		registry.emit("change");
+	}
+
+	/** Rebuild the workers that were busy when pi quit, as "interrupted" entries without a process. */
+	function restoreInterrupted(ctx: ExtensionContext): void {
+		interrupted.clear();
+		let records: WorkerRecord[];
+		try {
+			records = interruptedRecords(mergeRecords(ctx.sessionManager.getBranch() as any[]));
+		} catch {
+			return;
+		}
+		for (const rec of records) {
+			if (registry.workers.get(rec.name)?.alive) continue;
+			const o = rec.options ?? { cwd: ctx.cwd, notify: true };
+			const w = new Worker(
+				{
+					name: rec.name,
+					cwd: o.cwd,
+					runDir: rec.logPath ? path.dirname(rec.logPath) : multiAgentRoot(),
+					model: o.model,
+					thinking: o.thinking,
+					tools: o.tools,
+					role: o.role,
+					notify: o.notify,
+				},
+				host,
+			);
+			w.status = "interrupted";
+			w.sessionFile = rec.sessionFile;
+			w.model = o.model;
+			w.thinkingLevel = o.thinking;
+			w.activity = "interrupted";
+			const time = rec.at ?? Date.now();
+			if (rec.task) w.transcript.push({ kind: "task", text: rec.task, time });
+			w.transcript.push({
+				kind: "info",
+				text:
+					"Interrupted: pi quit while this worker was busy. /workers-resume (or asking the manager) continues it " +
+					(rec.sessionFile ? "in its own session, with its context." : "by restarting its task (it has no session file).") +
+					` Log of the interrupted run: ${rec.logPath ?? "?"}`,
+				time,
+			});
+			register(w);
+			interrupted.set(rec.name, rec);
+		}
+		if (interrupted.size === 0) return;
+		const names = [...interrupted.keys()];
+		if (ctx.hasUI) {
+			ctx.ui.notify(
+				`${names.length} worker(s) were interrupted when pi quit: ${names.join(", ")}. /workers-resume continues them.`,
+				"warning",
+			);
+		}
+		interruptedNoteDue = true;
+	}
+
+	/**
+	 * Note for the manager LLM, built when its next run starts rather than at session_start: if the user resumed or
+	 * dismissed the workers in between, there is nothing to say (a note queued earlier would be stale).
+	 */
+	pi.on("before_agent_start", () => {
+		if (!interruptedNoteDue) return;
+		interruptedNoteDue = false;
+		if (interrupted.size === 0) return;
+		const list = [...interrupted.values()]
+			.map((r) => `- ${r.name}${r.task ? `: ${oneLine(r.task, 160)}` : ""}`)
+			.join("\n");
+		return {
+			message: {
+				customType: NOTE_TYPE,
+				content:
+					`[multi-agent] These workers were interrupted when the previous pi process quit. They are not running:\n${list}\n` +
+					"If the user wants them continued, call worker_resume. It keeps each worker's own context, so do not " +
+					"respawn them with worker_spawn.",
+				display: false,
+			},
+		};
+	});
+
+	/** Continue interrupted workers (default: all), each in its own session. Returns one line per worker. */
+	async function resumeWorkers(ctx: ExtensionContext, names?: string[]): Promise<string[]> {
+		const targets = names?.length
+			? names.map((n) => getWorker(n))
+			: registry.list().filter((w) => w.status === "interrupted");
+		const lines: string[] = [];
+		for (const w of targets) {
+			const rec = interrupted.get(w.name);
+			if (w.status !== "interrupted" || !rec || resuming.has(w.name)) {
+				lines.push(`${w.name}: not interrupted (${STATUS_LABEL[w.status]}), nothing to resume`);
+				continue;
+			}
+			if (oldProcessAlive(rec.pid, w.name)) {
+				lines.push(`${w.name}: its old process (pid ${rec.pid}) still runs; resume after it exits, or kill it first`);
+				continue;
+			}
+			resuming.add(w.name);
+			try {
+				const session = rec.sessionFile && fs.existsSync(rec.sessionFile) ? rec.sessionFile : undefined;
+				const repaired = session ? repairSession(session) : 0;
+				const o = rec.options ?? { cwd: ctx.cwd, notify: true };
+				const worker = await spawnWorker(ctx, {
+					name: w.name,
+					cwd: o.cwd,
+					model: o.model,
+					thinking: o.thinking,
+					tools: o.tools,
+					role: o.role,
+					notify: o.notify,
+					resumeSession: session,
+				});
+				if (session) {
+					await worker.prompt(RESUME_PROMPT, "RESUME");
+					const fixed = repaired ? `; ${repaired} unfinished tool call(s) marked as not run` : "";
+					lines.push(`${w.name}: resumed in its own session${fixed}`);
+				} else {
+					await worker.prompt(`${rec.task ?? "Continue your previous task."}\n\n${INTERRUPTED_NOTE}`);
+					lines.push(`${w.name}: had no session file, so it restarted its task`);
+				}
+			} catch (error) {
+				lines.push(`${w.name}: ${error instanceof Error ? error.message : String(error)}`);
+			} finally {
+				resuming.delete(w.name);
+			}
+		}
+		return lines;
 	}
 
 	async function spawnWorker(
@@ -246,6 +442,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 			tools?: string;
 			cwd?: string;
 			notify?: boolean;
+			/** Resume: open this session file instead of creating a new session. */
+			resumeSession?: string;
 		},
 	): Promise<Worker> {
 		const name = sanitizeName(params.name);
@@ -269,6 +467,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 		if (existing) {
 			existing.removeAllListeners();
 			registry.workers.delete(name);
+			interrupted.delete(name); // a new or resumed worker replaces the interrupted entry
 		}
 		const worker = new Worker(
 			{
@@ -281,6 +480,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 				role: params.role,
 				extraArgs: extraWorkerArgs,
 				notify: params.notify ?? true,
+				sessionFile: params.resumeSession,
+				sessionDir: workerSessionDir(),
 			},
 			host,
 		);
@@ -322,14 +523,15 @@ export default function multiAgent(pi: ExtensionAPI) {
 			const deadline = Date.now() + timeoutMs;
 			let lastProgress = 0;
 			while (true) {
-				if (workers.every((w) => !w.busy)) return "done";
+				const now = workers.map(latest);
+				if (now.every((w) => !working(w))) return "done";
 				if (signal?.aborted) return "aborted";
 				if (userMessagePending(ctx)) return "interrupted";
 				if (Date.now() >= deadline) return "timeout";
 				if (onProgress && Date.now() - lastProgress >= 1000) {
 					lastProgress = Date.now();
-					const running = workers.filter((w) => w.busy).length;
-					onProgress(`Waiting for ${running}/${workers.length} worker(s)…\n${statusTable(workers)}`);
+					const running = now.filter(working).length;
+					onProgress(`Waiting for ${running}/${now.length} worker(s)…\n${statusTable(now)}`);
 				}
 				await abortableSleep(400, signal);
 			}
@@ -350,9 +552,10 @@ export default function multiAgent(pi: ExtensionAPI) {
 		}
 	}
 
-	function buildResults(workers: Worker[], outcome: WaitOutcome) {
-		const finished = workers.filter((w) => !w.busy);
-		const running = workers.filter((w) => w.busy);
+	function buildResults(waitedFor: Worker[], outcome: WaitOutcome) {
+		const workers = waitedFor.map(latest);
+		const finished = workers.filter((w) => !working(w));
+		const running = workers.filter(working);
 		const budget = Math.max(2_000, Math.floor(RESULT_BUDGET_BYTES / Math.max(1, finished.length)));
 		const parts: string[] = [];
 		if (outcome === "timeout") parts.push(`Wait timed out; ${running.length} worker(s) still running.`);
@@ -538,6 +741,11 @@ export default function multiAgent(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			uiCtx = ctx;
 			const worker = getWorker(params.name);
+			if (worker.status === "interrupted") {
+				throw new Error(
+					`Worker "${worker.name}" was interrupted when pi quit; call worker_resume to continue it with its context, then send.`,
+				);
+			}
 			if (!worker.alive) throw new Error(`Worker "${worker.name}" is ${STATUS_LABEL[worker.status]}; spawn a new one.`);
 			const mode = params.mode ?? "followUp";
 			const disposition = await worker.send(params.message, mode);
@@ -573,7 +781,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			uiCtx = ctx;
 			const targets = params.names?.length
 				? params.names.map(getWorker)
-				: registry.list().filter((w) => w.busy || (!w.reported && w.tasks > 0 && !w.stopping));
+				: registry.list().filter((w) => working(w) || (!w.reported && w.tasks > 0 && !w.stopping));
 			if (targets.length === 0) {
 				const all = registry.list();
 				const text = all.length
@@ -632,7 +840,14 @@ export default function multiAgent(pi: ExtensionAPI) {
 			for (const w of targets) {
 				try {
 					w.reported = true;
-					if (mode === "kill") {
+					if (w.status === "interrupted") {
+						if (mode === "kill") dismiss(w);
+						lines.push(
+							mode === "kill"
+								? `${w.name}: dismissed (it was interrupted; it will not be offered for resume)`
+								: `${w.name}: not running (interrupted); worker_resume continues it`,
+						);
+					} else if (mode === "kill") {
 						await w.stop();
 						lines.push(`${w.name}: killed`);
 					} else if (w.busy) {
@@ -649,6 +864,35 @@ export default function multiAgent(pi: ExtensionAPI) {
 				content: [{ type: "text", text: lines.join("\n") || "No live workers." }],
 				details: { workers: targets.map(snapshot) },
 			};
+		},
+	});
+
+	pi.registerTool({
+		name: "worker_resume",
+		label: "Resume Workers",
+		description:
+			"Continue workers that were interrupted when pi quit (status interrupted). Each one restarts in its own session, " +
+			"keeps its context and is told to continue where it stopped. Without names: all interrupted workers. " +
+			"Their results arrive automatically, like those of any worker.",
+		promptSnippet: "Continue workers that were interrupted when pi quit",
+		promptGuidelines: [
+			"Use worker_resume, not worker_spawn, to continue workers whose status is interrupted; worker_resume keeps each worker's own context.",
+		],
+		parameters: Type.Object({
+			names: Type.Optional(
+				Type.Array(Type.String(), { description: "Workers to resume. Default: all interrupted workers." }),
+			),
+		}),
+		renderCall: renderCallFor("worker_resume"),
+		renderResult: renderResultText,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			uiCtx = ctx;
+			const lines = await resumeWorkers(ctx, params.names);
+			const text = lines.length
+				? `${lines.join("\n")}\n\nEach resumed worker's result is sent to you automatically when it finishes. ` +
+					"Unless the user asked you to wait, do not wait."
+				: "No interrupted workers.";
+			return { content: [{ type: "text", text }], details: { outcome: "resumed", workers: registry.list().map(snapshot) } };
 		},
 	});
 
@@ -745,7 +989,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 			try {
 				const targets = name === "all" ? registry.list().filter((w) => w.alive) : [getWorker(name)];
 				for (const w of targets) {
-					if (mode === "kill") {
+					if (w.status === "interrupted") {
+						if (mode === "kill") dismiss(w);
+					} else if (mode === "kill") {
 						w.reported = true;
 						await w.stop();
 					} else await w.abort();
@@ -766,13 +1012,35 @@ export default function multiAgent(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerCommand("workers-resume", {
+		description: "Continue workers that were interrupted when pi quit: /workers-resume [name ...] (default: all)",
+		getArgumentCompletions: (prefix: string) => {
+			const items = [...interrupted.keys()]
+				.filter((n) => n.startsWith(prefix))
+				.map((n) => ({ value: n, label: n, description: "interrupted" }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => {
+			uiCtx = ctx;
+			const names = args.trim().split(/\s+/).filter((n) => n && n !== "all");
+			try {
+				const lines = await resumeWorkers(ctx, names);
+				const failed = lines.some((l) => !/: (resumed|had no session file)/.test(l));
+				ctx.ui.notify(lines.length ? lines.join("\n") : "No interrupted workers.", failed ? "warning" : "info");
+			} catch (error) {
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+			}
+		},
+	});
+
 	pi.registerCommand("workers-clear", {
-		description: "Remove stopped/crashed workers from the list",
+		description: "Remove stopped, crashed and interrupted workers from the list (interrupted ones are dismissed)",
 		handler: async (_args, ctx) => {
 			uiCtx = ctx;
 			let removed = 0;
 			for (const w of registry.list()) {
 				if (w.alive) continue;
+				dismiss(w);
 				w.removeAllListeners();
 				registry.workers.delete(w.name);
 				removed++;
@@ -786,6 +1054,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		uiCtx = ctx;
+		shuttingDown = false;
+		restoreInterrupted(ctx);
 		if (!ticker) {
 			// Keeps elapsed times in the widget/viewer moving while workers run.
 			ticker = setInterval(() => {
@@ -797,6 +1067,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		// From here on, stopping workers is not recorded: their last record stays "busy", so they come back as
+		// interrupted when this session is opened again.
+		shuttingDown = true;
 		if (ticker) clearInterval(ticker);
 		ticker = undefined;
 		if (renderTimer) clearTimeout(renderTimer);

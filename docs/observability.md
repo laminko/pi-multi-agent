@@ -222,8 +222,11 @@ pi --session <path>          # open it read/write in pi (continues that worker's
 pi --export <path> out.html  # export to HTML and exit
 ```
 
-The path is shown in the viewer header, in `worker_status <name>` and at the top of `<name>.log`. Worker sessions
-also appear in pi's session picker (`pi -r`) and in pi-web for the worker's directory.
+The path is shown in the viewer header, in `worker_status <name>` and at the top of `<name>.log`.
+
+Since v0.7.0, new worker sessions are stored in `~/.pi/agent/multi-agent/sessions/`, not in the project's session list.
+So `pi -c` and `pi -r` in a project open the manager. They no longer show up in pi-web's list for the project; open
+them by path. Older worker sessions stay where they were.
 
 ## Thinking
 

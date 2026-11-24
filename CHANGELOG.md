@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.7.0 — 2026-11-24
+
+Resume after pi quits. Worker processes still stop with the manager, but their work can be continued.
+
+### Added
+
+- The manager records each worker's state in its own session (custom entries, not sent to the model).
+- Reopening the manager session (`pi -c`, `pi -r`, `/resume`, or `/reload`) restores workers that were busy as
+  `↯ interrupted`, with a toast and a widget hint.
+- `/workers-resume [name ...]` and the `worker_resume` tool continue interrupted workers in their **own sessions**, with
+  their context, and tell them to check what is already done. Without a session file the task restarts instead.
+- Session repair: if pi quit while the model was making a tool call, the worker session is fixed (an error result per
+  unanswered call) before resuming. Without it the provider rejects the session with a 400.
+- New status `interrupted` (`↯`), in the widget, the status table, the legend and the viewer.
+- `PI_MULTI_AGENT_WORKER_SESSION_DIR`; `scripts/test-resume.ts` (Runbook T12, 10 checks, no model calls).
+- Runbook: "Recovering after pi quits".
+
+### Changed
+
+- New workers store their sessions in `~/.pi/agent/multi-agent/sessions/` (`--session-dir`), so `pi -c` in a project
+  opens the manager. Before, the worker session was usually the newest and `pi -c` opened it. A session flag in
+  `PI_MULTI_AGENT_WORKER_ARGS` still wins.
+- `/workers-clear` and `/worker-stop <name> kill` dismiss interrupted workers for good; `worker_send` to an
+  interrupted worker points to `worker_resume`.
+
+### Fixed
+
+- `worker_wait` called in the same message as `worker_spawn` or `worker_resume` (pi runs them in parallel) could see
+  the new worker still `starting` and return at once. A starting or resuming worker now counts as working, and the
+  wait follows a worker that was replaced by a resume.
+- (During development) a note about interrupted workers, queued when the session opened, reached the model after the
+  user had already resumed them. The note is now built when the next run starts, only if still relevant.
+
+### Tested
+
+- T12: 10 of 10 PASS. T1, T10, T11 still pass.
+- Against the real provider: an unrepaired session ending in an aborted tool call fails with 400; after repair the
+  worker continues (`repaired-ok`).
+- Live in tmux (haiku): quit mid `sleep 25`, `pi -c` opened the manager, `/workers-resume` continued the worker in the
+  same session file; it checked the files, redid only the interrupted step, and reported `finished-all-steps`.
+  Asking the manager in plain words led to `worker_resume` and one `worker_wait`. Dismissing with `/workers-clear`
+  held across a reopen. No orphan processes.
+
 ## 0.6.0 — 2026-11-24
 
 Worker results are rendered in the TUI instead of shown as raw text.

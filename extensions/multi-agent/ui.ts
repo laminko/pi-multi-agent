@@ -3,7 +3,7 @@
  */
 
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
+import { INTERRUPTED_HINT, oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
 import type { TranscriptEntry, Worker, WorkerStatus } from "./worker.ts";
 
 // Loose structural types: keeps this file independent of exact pi type exports.
@@ -46,6 +46,7 @@ const STATUS_COLOR: Record<WorkerStatus, string> = {
 	aborted: "warning",
 	stopped: "dim",
 	crashed: "error",
+	interrupted: "warning",
 };
 
 function statusBadge(w: Worker, theme: ThemeLike): string {
@@ -66,6 +67,7 @@ function preview(w: Worker, theme: ThemeLike, max: number): string {
 		return theme.fg("muted", `⟳ ${oneLine(w.activity, max)}`);
 	}
 	if (w.status === "error" || w.status === "crashed") return theme.fg("error", oneLine(w.errorMessage ?? w.activity, max));
+	if (w.status === "interrupted") return theme.fg("warning", `↯ ${oneLine(INTERRUPTED_HINT, max - 2)}`);
 	if (w.result) return theme.fg("dim", `→ ${oneLine(w.result, max)}`);
 	return theme.fg("dim", oneLine(w.activity, max));
 }
@@ -80,7 +82,7 @@ const WIDGET_FIRST_ROW = 2;
 /** Widget groups: 0 running, 1 needs attention, 2 finished, 3 stopped. */
 function widgetRank(w: Worker): number {
 	if (w.busy || w.status === "starting" || w.status === "running") return 0;
-	if (w.status === "error" || w.status === "crashed") return 1;
+	if (w.status === "error" || w.status === "crashed" || w.status === "interrupted") return 1;
 	if (w.status === "stopped") return 3;
 	return 2; // idle (done), aborted
 }
@@ -115,8 +117,10 @@ function widgetLayout(source: WorkerSource, width: number, theme: ThemeLike): Wi
 	const running = workers.filter((w) => w.busy).length;
 	const done = workers.filter((w) => w.status === "idle").length;
 	const failed = workers.filter((w) => w.status === "error" || w.status === "crashed").length;
+	const interrupted = workers.filter((w) => w.status === "interrupted").length;
 	const summary = [`${running} running`, `${done} done`];
 	if (failed) summary.push(`${failed} failed`);
+	if (interrupted) summary.push(theme.fg("warning", `${interrupted} interrupted (/workers-resume)`));
 	const lines = [
 		theme.fg("dim", "─ ") +
 			theme.bold("workers") +
@@ -343,7 +347,9 @@ export function createViewer(
 					? theme.fg("warning", ` ⟳ ${oneLine(w.activity, 300)}`)
 					: w.status === "error" || w.status === "crashed"
 						? theme.fg("error", ` ${oneLine(w.errorMessage ?? w.activity, 300)}`)
-						: theme.fg("dim", ` ${oneLine(w.activity, 300)}`),
+						: w.status === "interrupted"
+							? theme.fg("warning", ` ↯ ${INTERRUPTED_HINT}`)
+							: theme.fg("dim", ` ${oneLine(w.activity, 300)}`),
 			];
 
 			// Collect transcript lines from the end until the viewport (plus scroll) is filled.

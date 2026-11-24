@@ -1,6 +1,6 @@
 {
   "name": "pi-multi-agent",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Manager pi that spawns and supervises worker pi agents over RPC, with live thinking/progress views",
   "private": true,
   "type": "module",

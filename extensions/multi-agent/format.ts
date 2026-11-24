@@ -26,6 +26,7 @@ export const STATUS_ICON: Record<WorkerStatus, string> = {
 	aborted: "■",
 	stopped: "○",
 	crashed: "✗",
+	interrupted: "↯",
 };
 
 export const STATUS_LABEL: Record<WorkerStatus, string> = {
@@ -36,7 +37,11 @@ export const STATUS_LABEL: Record<WorkerStatus, string> = {
 	aborted: "aborted",
 	stopped: "stopped",
 	crashed: "crashed",
+	interrupted: "interrupted",
 };
+
+/** Shown for interrupted workers (widget, status table, viewer). */
+export const INTERRUPTED_HINT = "pi quit while it worked · /workers-resume";
 
 export function statsText(w: Worker): string {
 	const parts = [
@@ -61,6 +66,7 @@ export function statusLine(w: Worker): string {
 	let line = `${STATUS_ICON[w.status]} ${w.name} [${STATUS_LABEL[w.status]}] ${statsText(w)}${queued}`;
 	if (w.busy) line += ` — ${oneLine(w.activity, 140)}`;
 	else if (w.status === "error" || w.status === "crashed") line += ` — ${oneLine(w.errorMessage ?? w.activity, 200)}`;
+	else if (w.status === "interrupted") line += ` — ${INTERRUPTED_HINT}`;
 	return line;
 }
 
@@ -70,7 +76,7 @@ export function statusLine(w: Worker): string {
  */
 export const STATUS_LEGEND = [
 	"Legend:",
-	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped",
+	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped · ↯ interrupted (pi quit)",
 	"  Turns   model calls (one per turn_start)",
 	"  Tools   tool calls; (n✗) = n returned an error",
 	"  Ctx     context size now = total tokens of the last model call",
@@ -88,6 +94,7 @@ const RIGHT_ALIGNED = new Set([2, 3, 4, 5, 6, 7, 8]);
 function nowText(w: Worker, max: number): string {
 	if (w.busy) return oneLine(w.activity, max);
 	if (w.status === "error" || w.status === "crashed") return oneLine(w.errorMessage ?? w.activity, max);
+	if (w.status === "interrupted") return oneLine(INTERRUPTED_HINT, max);
 	return "";
 }
 

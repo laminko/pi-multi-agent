@@ -128,13 +128,33 @@ worker dialogs are cancelled automatically.
   one counts toward the live-worker limit of 8.
 - Ask the manager for concise worker outputs ("max 20 lines"), because results are added to the manager's context.
 
+## If pi quits while workers run
+
+Quitting pi by accident (Ctrl+C, Ctrl+D, closing the terminal) stops every worker; their processes do not keep
+running. The work is not lost:
+
+1. Reopen the manager: `pi -c` (or `pi -r` and pick it). Worker sessions are kept in their own directory, so
+   `pi -c` finds the manager, not a worker.
+2. Every worker that was busy comes back as `↯ interrupted`: in a toast, in the widget, and in `/workers`.
+3. Type `/workers-resume`, or just ask the manager ("continue the interrupted workers"); it calls `worker_resume`.
+   Each worker restarts **in its own session**, keeps its context, and is told to check what is already done
+   before it continues. Its result then arrives like any other.
+
+`/workers-resume <name>` resumes one worker. To drop an interrupted worker instead, use
+`/worker-stop <name> kill` or `/workers-clear`.
+
+The same applies after `/reload` and when you `/resume` the manager session later. Details:
+[Runbook: Recovering after pi quits](../RUNBOOK.md#recovering-after-pi-quits).
+
 ## Lifecycle rules
 
-- Workers end with the manager **session**: quitting, `/new`, `/resume`, `/fork` and `/reload` all stop them.
+- Workers run as long as the manager **session**: quitting, `/new`, `/resume`, `/fork` and `/reload` all stop them.
+  Workers that were busy can be resumed later, see above.
 - If the manager process dies, workers see their stdin close and exit on their own.
 - A worker that crashed or was killed cannot be revived. Spawn a new one; reusing the name is fine.
-- Worker sessions are saved like any pi session, named `worker:<name>`, and appear in your session list for that
-  directory. See the [Runbook](../RUNBOOK.md#maintenance) to turn this off or clean them up.
+- Worker sessions are saved like any pi session, named `worker:<name>`, in `~/.pi/agent/multi-agent/sessions/`
+  (since v0.7.0; before that, in your project's session list). See the [Runbook](../RUNBOOK.md#maintenance) to clean
+  them up.
 
 ## FAQ
 
@@ -148,5 +168,6 @@ set), with your permissions.
 
 **Why didn't I see any thinking?** It depends on the model; see [Observability](observability.md#thinking).
 
-**Can I reconnect to workers after restarting pi?** Not in v0.1.0. The processes end with the session. Their
-transcripts remain in the logs and session files.
+**Can I reconnect to workers after restarting pi?** Not to the running processes: they end with the session. But
+since v0.7.0 you can resume workers that were busy: each continues in its own session, with its context. See
+[If pi quits while workers run](#if-pi-quits-while-workers-run).

@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.6.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.7.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
@@ -28,6 +28,7 @@ How v0.6.0 works inside, and why it is built this way. For behavior and defaults
 | `worker.ts` | One worker process: spawn, strict JSONL RPC client, event → state mapping, transcript, log files, shutdown escalation |
 | `ui.ts` | Widget component / plain lines, and the `/workers` viewer component |
 | `format.ts` | Shared text formatting (status table, legend, reports, numbers) |
+| `resume.ts` | Resume after quit: worker record format and merge, interrupted detection, session repair, old-process check |
 | `report.ts` | Worker result blocks: the LLM text (`formatResultBlock`, `formatRunningBlock`), its parser, and the TUI renderer for tool rows and auto-report messages |
 
 ## Process model
@@ -109,6 +110,9 @@ manager UI. `setStatus`, `setWidget`, `setTitle` and `set_editor_text` are ignor
 
    any state ── stop() ──────────► stopped     (intentional exit)
    any state ── unexpected exit ─► crashed     (exit reason + stderr tail)
+
+   (session reopened, last record busy) ──► interrupted ── worker_resume ──► new Worker: starting → running
+                                                       ── kill / clear ───► stopped (dismissed)
 ```
 
 `busy` is the authoritative "working" flag. It is set **synchronously before** `prompt` is sent, so a
@@ -185,6 +189,36 @@ registry and widget. `Worker.stop()` escalates step by step:
 
 If the manager process dies without running this, the workers' stdin closes and pi shuts them down on its own.
 
+## Resume after quit
+
+A worker's processes cannot outlive the manager (its stdin and stdout are pipes to the manager). What survives is the
+worker's **session file** and the manager's **records** of it, so v0.7.0 resumes the work instead of the process.
+
+- **Records.** `Worker` emits `record` when a task starts (before the prompt is sent, so a quit at any later moment
+  finds it busy), when a prompt is rejected or handled, when a task settles, and when the process exits. `index.ts`
+  turns each into a `pi.appendEntry("multi-agent-worker", …)` in the manager session, except during
+  `session_shutdown` (`shuttingDown`). Records of the current branch merge per worker (later fields win; a resume
+  prompt is not recorded as a task, so the original task survives). See the
+  [Reference](reference.md#worker-records-manager-session) for the format.
+- **Restore.** `session_start` (any reason) rebuilds the busy workers as `Worker` objects with status `interrupted`
+  and no process, shows a toast, and arms a note for the model. The note is built in `before_agent_start`, only if
+  workers are still interrupted then: a note queued at `session_start` went stale when the user resumed the workers
+  before the next run, and the model then claimed they were not running.
+- **Repair.** If pi quit while the model was emitting a tool call, the worker session ends with an aborted assistant
+  message whose tool calls have no results, and the provider rejects it (`tool_use ids were found without
+  tool_result blocks`). `repairSession()` opens the file with pi's `SessionManager` and appends one error `toolResult`
+  per unanswered call. It does nothing if anything else came after the tool calls. If pi quit during tool
+  *execution*, pi has already recorded an aborted result and nothing needs repair.
+- **Resume.** `spawnWorker(…, resumeSession)` starts `pi --mode rpc --session <file>` with the recorded options and
+  sends `RESUME_PROMPT`. The new `Worker` replaces the interrupted one in the registry. Without a session file it
+  starts fresh with the recorded task plus `INTERRUPTED_NOTE`.
+- **Waits during a resume.** The model often sends `worker_resume` (or `worker_spawn`) and `worker_wait` in one
+  message, and pi runs them in parallel. The wait therefore counts a worker as working while it is `busy`, `starting`,
+  or being resumed (`resuming` set), and looks the worker up by name on every poll (`latest()`), because a resume
+  replaces the object.
+- **Session location.** New workers get `--session-dir <multi-agent dir>/sessions`, so `pi -c` in the project does
+  not open a worker session (before v0.7.0 it did: the worker session was usually the newest).
+
 ## Design decisions
 
 | Decision | Why | Alternative considered |
@@ -195,6 +229,8 @@ If the manager process dies without running this, the workers' stdin closes and 
 | Auto-notify with `followUp` + `triggerTurn` | the manager can fire and forget; results are never lost | only `worker_wait` (forces the manager to block) |
 | Polling wait | robust, no missed-event races, trivial to cancel | event-driven promises |
 | Do not wait by default; interrupt a wait on user input | the user can always talk to the manager and steer workers through it | wait by default (v0.1.0): blocked the user for up to 30 min |
+| Resume the work, not the process: records + `--session` + repair | survives any quit, including a crash of the manager; uses only pi's session files and APIs | detached workers behind a socket (roadmap): keeps processes alive, but needs a daemon and process ownership rules |
+| Worker sessions in their own directory | `pi -c` must find the manager after a quit | keep them in the project's list (pi-web shows them, but `pi -c` opened a worker) |
 | Recursion guard through an env var | workers load the same packages | process-tree depth tracking |
 | Logs outside the repo (`~/.pi/agent/multi-agent`) | no pollution of projects or git status | `<cwd>/.pi/…` |
 | Tools allowlist + role prompt, no sandbox | matches pi's own model; simple | containers / worktrees (roadmap) |
@@ -212,11 +248,14 @@ If the manager process dies without running this, the workers' stdin closes and 
 
 If a pi upgrade changes any of these, re-run the smoke tests in the [Runbook](../RUNBOOK.md#smoke-tests):
 
-- CLI: `--mode rpc`, `--name`, `--model`, `--thinking`, `--tools`, `--append-system-prompt`
+- CLI: `--mode rpc`, `--name`, `--model`, `--thinking`, `--tools`, `--append-system-prompt`, `--session`,
+  `--session-dir`
 - RPC: `get_state`, `prompt`, `steer`, `follow_up`, `abort`, `extension_ui_request/response`, the JSON event stream
   (`agent_settled`, `message_update` sub-events, `tool_execution_*`, `queue_update`, `auto_retry_*`, `compaction_*`)
 - Extension API: `registerTool` (`renderCall`/`renderResult`, `promptSnippet`/`promptGuidelines`), `registerCommand`,
   `registerMessageRenderer`, `sendMessage` (`deliverAs`, `triggerTurn`), `ctx.ui.setWidget` (factory and string
-  forms), `ctx.ui.custom`, dialogs, `session_start`/`session_shutdown`, `getAgentDir`, `truncateHead`
+  forms), `ctx.ui.custom`, dialogs, `session_start`/`session_shutdown`, `before_agent_start` (`message`),
+  `pi.appendEntry`, `ctx.sessionManager.getBranch`, `getAgentDir`, `truncateHead`, `SessionManager.open` +
+  `appendMessage` + `getBranch` (session repair)
 - pi-tui: `truncateToWidth`, `visibleWidth`, `wrapTextWithAnsi`, `matchesKey`, `Text`, `Markdown` (including
   tables), `Container`, `Spacer`; pi-coding-agent: `getMarkdownTheme`

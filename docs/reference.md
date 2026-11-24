@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.6.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.7.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -97,7 +97,31 @@ to 40 KB.
 | `name` | string | **required** | A worker name, or `all` (all live workers). |
 | `mode` | `abort` \| `kill` | `abort` | `abort`: cancel the current task; the worker stays alive. `kill`: terminate the process. |
 
-Stopping marks the worker as reported, so it does not auto-notify.
+Stopping marks the worker as reported, so it does not auto-notify. On an `interrupted` worker, `kill` dismisses it:
+it is no longer offered for resume.
+
+### `worker_resume`
+
+Continues workers that were busy when pi quit (status `interrupted`).
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| `names` | string[] | all interrupted workers | |
+
+For each worker:
+
+1. If its old process still runs (the manager was killed hard, so the worker never got a shutdown), it is skipped
+   with a message. Two pi processes must not write the same session file.
+2. If its session ends with tool calls that have no result (pi quit while a tool call was being made), each gets an
+   error result `Not run: the session was interrupted …`. Providers reject a conversation with unanswered tool calls.
+3. A new worker process opens the **same session file** (`--session`) with the recorded model, thinking level,
+   tools, role, cwd and `notify`, and gets the prompt: *"You were interrupted … Continue your task from where you
+   stopped. First check what is already done …"*.
+4. Without a session file (for example `--no-session` in `PI_MULTI_AGENT_WORKER_ARGS`), it starts fresh with its
+   recorded task plus a note that an earlier attempt was interrupted.
+
+Returns one line per worker (`resumed in its own session`, `had no session file, so it restarted its task`, or why
+not). Results then arrive like any worker's.
 
 ## Result format
 
@@ -173,8 +197,9 @@ is per task.
 | `/workers [name]` | Opens the live viewer (TUI). Without a TUI, shows the status table as a notification. Tab-completes worker names. |
 | `/workers-legend` | Shows the [status table](#status-table) and the legend of each column. |
 | `/worker-send <name> <message>` | Sends a message as you. Steers the worker if busy, otherwise starts a new task. When it finishes, the manager is auto-notified. |
-| `/worker-stop <name\|all> [kill]` | Aborts the current task, or with `kill` terminates the worker. |
-| `/workers-clear` | Removes **stopped and crashed** workers from the list and widget. Live workers, including idle ones, stay. Log files are kept. |
+| `/worker-stop <name\|all> [kill]` | Aborts the current task, or with `kill` terminates the worker. `kill` on an interrupted worker dismisses it. |
+| `/workers-resume [name ...]` | Resumes interrupted workers (default: all), like [`worker_resume`](#worker_resume). Tab-completes interrupted names. |
+| `/workers-clear` | Removes **stopped, crashed and interrupted** workers from the list and widget; interrupted ones are dismissed for good. Live workers, including idle ones, stay. Log files are kept. |
 
 ## Viewer keys
 
@@ -221,9 +246,11 @@ Right and middle clicks are not used. A drag is not used, so pi's text selection
 | `aborted` | ■ | aborted | Last task was aborted; the worker is still alive |
 | `stopped` | ○ | stopped | Process terminated on purpose (kill, or manager shutdown) |
 | `crashed` | ✗ | crashed | Process exited unexpectedly; `errorMessage` holds the exit reason and stderr tail |
+| `interrupted` | ↯ | interrupted | Restored when the manager session was reopened: the worker was busy when pi quit. No process; see [`worker_resume`](#worker_resume) |
 
 `idle`, `error` and `aborted` workers are alive and accept `worker_send`. `stopped` and `crashed` workers do not;
-spawn a new one (the same name can be reused).
+spawn a new one (the same name can be reused). `interrupted` workers are resumed with `worker_resume`; `worker_send`
+refuses them with a hint.
 
 ## Files
 
@@ -277,9 +304,29 @@ in the pi docs), made more compact:
 
 ### Worker session files
 
-Each worker is a normal pi session named `worker:<name>`, stored in pi's normal session directory for the
-worker's cwd. Its path is shown in the viewer header, `worker_status <name>` and at the top of `<name>.log`.
-To turn this off, set `PI_MULTI_AGENT_WORKER_ARGS="--no-session"`.
+Each worker is a normal pi session named `worker:<name>`. Since v0.7.0 new workers store it in
+`<multi-agent dir>/sessions/` (`--session-dir`; change it with `PI_MULTI_AGENT_WORKER_SESSION_DIR`), so `pi -c` and
+`pi -r` in a project find the manager, not a worker. Before v0.7.0 they were stored in pi's normal session directory
+for the worker's cwd. Its path is shown in the viewer header, `worker_status <name>` and at the top of `<name>.log`.
+To turn sessions off, set `PI_MULTI_AGENT_WORKER_ARGS="--no-session"` (then resume restarts tasks instead of
+continuing them). A `--session-dir`, `--session` or `--no-session` in `PI_MULTI_AGENT_WORKER_ARGS` replaces the default.
+
+### Worker records (manager session)
+
+The manager appends a custom entry (`customType: "multi-agent-worker"`, not sent to the model) to **its own**
+session whenever a worker's state changes: a task starts (with the task text), a task settles, the process exits.
+Nothing is recorded while the manager shuts down, so a worker that was busy at quit keeps `busy: true` as its last
+record. When the session is opened again (startup with `-c`/`-r`/`--session`, `/resume`, `/reload`), the records of
+the current branch are merged per worker, and the busy ones come back as `interrupted`.
+
+```json
+{"v":1,"name":"be-lesson","status":"running","busy":true,"at":1764000000000,
+ "options":{"cwd":"/repo","model":"claude-code/default","thinking":"high","tools":"read,bash","notify":true},
+ "task":"…","sessionFile":"~/.pi/agent/multi-agent/sessions/….jsonl","pid":12345,"logPath":"…/be-lesson.log"}
+```
+
+At the start of the manager's next run, if workers are still interrupted, the model gets a hidden note listing them
+and telling it to use `worker_resume` rather than respawning.
 
 ## Environment variables
 
@@ -289,7 +336,8 @@ These are read when the manager loads the extension.
 |---|---|---|
 | `PI_MULTI_AGENT_MAX_WORKERS` | `8` | Maximum number of live (not stopped/crashed) workers |
 | `PI_MULTI_AGENT_WIDGET_ROWS` | `8` | Maximum worker rows in the widget; the rest fold into one `… N more` line |
-| `PI_MULTI_AGENT_DIR` | `<pi agent dir>/multi-agent` | Root for run directories |
+| `PI_MULTI_AGENT_DIR` | `<pi agent dir>/multi-agent` | Root for run directories and worker sessions |
+| `PI_MULTI_AGENT_WORKER_SESSION_DIR` | `<multi-agent dir>/sessions` | Where new workers store their sessions |
 | `PI_MULTI_AGENT_WORKER_ARGS` | none | Extra CLI args for every worker, split on whitespace (no quoting). E.g. `--no-session`, `--session-dir /path`, `--no-extensions` |
 
 Set by the extension on worker processes:
