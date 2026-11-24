@@ -72,13 +72,46 @@ function preview(w: Worker, theme: ThemeLike, max: number): string {
 
 // ------------------------------------------------------------------ widget
 
-const MAX_WIDGET_ROWS = 8;
-/** Widget line layout: 0 = summary, 1 = column header, 2.. = one row per shown worker. */
+/** Max worker rows in the widget; the rest fold into one "… N more" line. */
+const MAX_WIDGET_ROWS = Math.max(1, Math.floor(Number(process.env.PI_MULTI_AGENT_WIDGET_ROWS)) || 8);
+/** Widget line layout: 0 = summary, 1 = column header, 2.. = one row per shown worker, then the "more" line. */
 const WIDGET_FIRST_ROW = 2;
 
+/** Widget groups: 0 running, 1 needs attention, 2 finished, 3 stopped. */
+function widgetRank(w: Worker): number {
+	if (w.busy || w.status === "starting" || w.status === "running") return 0;
+	if (w.status === "error" || w.status === "crashed") return 1;
+	if (w.status === "stopped") return 3;
+	return 2; // idle (done), aborted
+}
+
+/**
+ * Widget row order: running workers first, in spawn order, so their rows stay put while they work. Then errors and
+ * crashes, then finished workers, then stopped ones; within those groups the most recently active worker comes first.
+ * With more workers than rows, the active ones therefore stay visible.
+ */
+export function widgetOrder(workers: Worker[]): Worker[] {
+	return workers
+		.map((w, i) => ({ w, i, rank: widgetRank(w), last: w.taskFinishedAt ?? w.createdAt }))
+		.sort((a, b) => a.rank - b.rank || (a.rank === 0 ? 0 : b.last - a.last) || a.i - b.i)
+		.map((x) => x.w);
+}
+
+interface WidgetLayout {
+	lines: string[];
+	/** Workers that have a row, top to bottom. */
+	shown: Worker[];
+	/** Workers folded into the "… N more" line. */
+	hidden: Worker[];
+}
+
 export function widgetLines(source: WorkerSource, width: number, theme: ThemeLike = plainTheme): string[] {
+	return widgetLayout(source, width, theme).lines;
+}
+
+function widgetLayout(source: WorkerSource, width: number, theme: ThemeLike): WidgetLayout {
 	const workers = source.list();
-	if (workers.length === 0) return [];
+	if (workers.length === 0) return { lines: [], shown: [], hidden: [] };
 	const running = workers.filter((w) => w.busy).length;
 	const done = workers.filter((w) => w.status === "idle").length;
 	const failed = workers.filter((w) => w.status === "error" || w.status === "crashed").length;
@@ -90,7 +123,9 @@ export function widgetLines(source: WorkerSource, width: number, theme: ThemeLik
 			theme.fg("dim", ` ${summary.join(" · ")}  ·  /workers to watch live  ·  /workers-legend`),
 	];
 	// Same columns as the default status table (format.ts statusTable); the last column is the live preview.
-	const shown = workers.slice(0, MAX_WIDGET_ROWS);
+	const ordered = widgetOrder(workers);
+	const shown = ordered.slice(0, MAX_WIDGET_ROWS);
+	const hidden = ordered.slice(MAX_WIDGET_ROWS);
 	const headers = ["St", "Worker", "Turns", "Tools", "Ctx", "↑In", "↓Out", "Cost", "Time"];
 	const rows = shown.map((w) => {
 		const c = statusCells(w).slice(0, headers.length);
@@ -113,24 +148,33 @@ export function widgetLines(source: WorkerSource, width: number, theme: ThemeLik
 		const room = Math.max(10, width - visibleWidth(head));
 		lines.push(truncateToWidth(head + preview(w, theme, room), width));
 	}
-	if (workers.length > MAX_WIDGET_ROWS) lines.push(theme.fg("dim", ` … ${workers.length - MAX_WIDGET_ROWS} more`));
-	return lines.map((l) => truncateToWidth(l, width));
+	if (hidden.length > 0) {
+		const counts = new Map<string, number>();
+		for (const w of hidden) counts.set(STATUS_LABEL[w.status], (counts.get(STATUS_LABEL[w.status]) ?? 0) + 1);
+		const breakdown = [...counts].map(([label, n]) => `${n} ${label}`).join(", ");
+		lines.push(theme.fg("dim", ` … ${hidden.length} more (${breakdown})  ·  /workers to see all`));
+	}
+	return { lines: lines.map((l) => truncateToWidth(l, width)), shown, hidden };
 }
 
 /**
  * Widget component. In fullscreen mode a left click opens the viewer:
- * on a worker row, on that worker; on the summary or column header, on the first worker.
+ * on a worker row, on that worker; on the "… N more" line, on the first hidden worker; on the summary or column
+ * header, on the first worker. Clicks map to the rows of the last render, so a reorder cannot misdirect them.
  */
 export function createWidgetComponent(source: WorkerSource, theme: ThemeLike, onOpen?: (name?: string) => void) {
+	let last: WidgetLayout = { lines: [], shown: [], hidden: [] };
 	return {
 		render(width: number): string[] {
-			return widgetLines(source, width, theme);
+			last = widgetLayout(source, width, theme);
+			return last.lines;
 		},
 		handleMouse(event: MouseEventLike): MouseResult {
 			if (!onOpen || !isLeftClick(event)) return undefined;
-			const shown = source.list().slice(0, MAX_WIDGET_ROWS);
 			const row = event.y - WIDGET_FIRST_ROW;
-			onOpen(row >= 0 && row < shown.length ? shown[row]!.name : undefined);
+			const target =
+				row >= 0 && row < last.shown.length ? last.shown[row] : row === last.shown.length ? last.hidden[0] : undefined;
+			onOpen(target?.name);
 			return { handled: true, render: false };
 		},
 		invalidate() {},
@@ -198,6 +242,8 @@ export function createViewer(
 	// Clickable spans from the last render: the tab bar (line 0) and the help line (last line).
 	let tabSpans: HitSpan<string>[] = [];
 	let helpSpans: HitSpan<"message" | "abort" | "kill" | "close" | "follow">[] = [];
+	/** Index of the first visible tab when the tabs do not all fit. */
+	let tabStart = 0;
 	let lineCount = 0;
 
 	const onChange = () => {
@@ -240,22 +286,54 @@ export function createViewer(
 			const rows = process.stdout.rows || 40;
 			bodyHeight = Math.max(6, rows - 10);
 
-			// Tab bar: one clickable tab per worker; the current one shows its status label.
-			tabSpans = [];
-			let tabBar = " ";
-			let x = 1;
-			for (const t of workers) {
+			// Tab bar: one clickable tab per worker; the current one shows its status label. When the tabs do not fit,
+			// a window of them is shown that always contains the current tab, with "‹ N" / "N ›" markers counting
+			// the hidden tabs on each side. The window only moves when the current tab would leave it.
+			const n = workers.length;
+			const tabs = workers.map((t) => {
 				const label = t === w ? ` ${t.name} ` : ` ${STATUS_ICON[t.status]} ${t.name} `;
 				const styled =
 					t === w
 						? `${theme.fg("accent", theme.bold(`[${label}]`))} ${statusBadge(t, theme)}`
 						: theme.fg(STATUS_COLOR[t.status], ` ${label} `);
-				const wTab = visibleWidth(styled);
-				tabSpans.push({ x0: x, x1: x + wTab, value: t.name });
+				return { name: t.name, styled, width: visibleWidth(styled) };
+			});
+			const counter = theme.fg("dim", ` worker ${index + 1}/${n}`);
+			const room = width - 1 - visibleWidth(counter);
+			const leftMarker = (hiddenCount: number) => `‹ ${hiddenCount} `;
+			const rightMarker = (hiddenCount: number) => ` ${hiddenCount} ›`;
+			/** Whether tabs lo..hi (inclusive), each followed by a space, fit together with the markers they need. */
+			const fits = (lo: number, hi: number) => {
+				let total = 0;
+				for (let i = lo; i <= hi; i++) total += tabs[i]!.width + 1;
+				if (lo > 0) total += visibleWidth(leftMarker(lo)) + 1;
+				if (hi < n - 1) total += visibleWidth(rightMarker(n - 1 - hi)) + 1;
+				return total <= room;
+			};
+			const lastFrom = (start: number) => {
+				let hi = start;
+				while (hi + 1 < n && fits(start, hi + 1)) hi++;
+				return hi;
+			};
+			tabStart = Math.max(0, Math.min(tabStart, index));
+			let tabEnd = lastFrom(tabStart);
+			while (tabEnd < index) tabEnd = lastFrom(++tabStart);
+			while (tabStart > 0 && fits(tabStart - 1, tabEnd)) tabStart--; // use free room on the right
+
+			tabSpans = [];
+			let tabBar = " ";
+			let x = 1;
+			const place = (styled: string, value: string) => {
+				const wd = visibleWidth(styled);
+				tabSpans.push({ x0: x, x1: x + wd, value });
 				tabBar += `${styled} `;
-				x += wTab + 1;
-			}
-			tabBar += theme.fg("dim", ` worker ${index + 1}/${workers.length}`);
+				x += wd + 1;
+			};
+			// A marker click switches to the nearest hidden worker on that side.
+			if (tabStart > 0) place(theme.fg("muted", leftMarker(tabStart)), workers[tabStart - 1]!.name);
+			for (let i = tabStart; i <= tabEnd; i++) place(tabs[i]!.styled, tabs[i]!.name);
+			if (tabEnd < n - 1) place(theme.fg("muted", rightMarker(n - 1 - tabEnd)), workers[tabEnd + 1]!.name);
+			tabBar += counter;
 
 			const header = [
 				tabBar,

@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.4.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.5.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
@@ -143,12 +143,18 @@ manager UI. `setStatus`, `setWidget`, `setTitle` and `set_editor_text` are ignor
   updates are just `tui.requestRender()` (throttled to 100 ms). In other modes with a UI (RPC hosts), only string
   arrays are supported, so the plain lines are re-sent at most once per second. A 1 s ticker emits `change` while any
   worker is busy, so elapsed times keep moving. The widget is cleared while the viewer is open, and whenever there
-  are no workers.
+  are no workers. Rows are sorted by `widgetOrder()` (running in spawn order, then error/crashed, done/aborted and
+  stopped, each newest first) and capped at `PI_MULTI_AGENT_WIDGET_ROWS`; the rest fold into a `… N more` line.
+  The component keeps the layout of its last render, so a click maps to the row the user saw even if the order
+  changed since.
 - **Viewer.** A `ctx.ui.custom()` component. It renders only the tail it needs: it walks transcript entries from
   the end until the viewport plus scroll offset is filled. Each entry's wrapped lines are cached in a `WeakMap` keyed
   by the entry and invalidated by text length or width, so streaming re-wraps only the entry that grows. Registry
   changes trigger renders, throttled to 80 ms. Actions that need dialogs (message, kill-confirm) close the viewer
   with an action value. The command handler then runs the dialog and reopens the viewer on the same worker.
+  The tab bar is a window `[tabStart, tabEnd]` over the workers in spawn order: `tabStart` persists across renders
+  and moves only when the current tab would fall outside the window, and the window grows left when there is free
+  room. The `worker i/N` counter's width is reserved, so it is never cut off.
 - **Tool rows.** Custom `renderCall` shows the worker name and task. `renderResult` shows the first 12 lines
   collapsed, and everything when expanded. Auto-notifications have a message renderer (`⚑ worker <name> <status>`, 8
   lines collapsed).
