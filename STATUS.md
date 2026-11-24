@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.2.0 |
+| **Version** | 0.2.1 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -45,15 +45,16 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V13 | Doc recipes | every `jq` command in docs/observability.md, run against real logs | ✅ All work |
 | V14 | Typing interrupts `worker_wait` | `scripts/test-wait-interrupt.ts` (T7), `claude-code/claude-haiku-5-5` | ✅ `outcome=interrupted`, 211 ms after the steer; 1 of 1 worker still running |
 | V15 | No wait after spawn; toast; auto-report | `scripts/test-auto-report.ts` (T8) | ✅ 0 `worker_wait` calls; 1 toast `Worker sleeper done`; 2 `agent_end`; the manager reported the result |
+| V16 | Interrupt with a follow-up message | `TEST_MODE=follow_up` T7, 3 runs | ✅ 3 of 3 `interrupted`, 210 ms each |
+| V17 | Interactive TUI: steer and Alt+Enter interrupt, toast, auto-report | tmux, haiku (T9) | ✅ Enter: wait text shown 463 ms after the keypress; Alt+Enter: 490 ms; the manager answered both; toast `Worker s3 done` at info level; `⚑ worker s3 done` reported |
+| V18 | Regression after 0.2.1 prompt fix | T7 × 3, T7 follow-up × 3, T8 × 3 | ✅ 9 of 9 PASS (T8 now also counts `wait: true`) |
 
 ## Not yet verified
 
 - Dialog forwarding (`select`/`confirm`/`input`/`editor`) from extensions running inside workers.
 - `worker_send` with `steer` / `followUp` while a worker is busy (RPC `steer` / `follow_up`).
 - `worker_stop` called by the manager LLM; `/worker-send`, `/worker-stop`, `/workers-clear`; viewer keys `a` and `k`.
-- `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14.)
-- The interrupt with a `followUp` message (`Alt+Enter`). Only `steer` was tested.
-- The interrupt and the toast in the interactive TUI. V14 and V15 ran over RPC.
+- `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14, V16, V17.)
 - `PI_MULTI_AGENT_MAX_WORKERS`, `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`.
 - Retry and compaction events inside long-running workers.
 - A manager hosted by pi-web; Linux; Windows.
@@ -120,3 +121,5 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   could not steer workers through the manager. Fix: the wait returns `interrupted` on a pending user message; the
   manager is told not to wait after a spawn; each finished worker shows a toast. Verified V14 and V15.
   Added `INDEX.md` and `CHANGELOG.md`.
+- v0.2.1. Verified the follow-up path (V16) and the interactive TUI (V17). Found and fixed 2 defects: the done
+  toast showed as a warning, and in 1 of 2 T8 runs the manager used `wait: true` on `worker_spawn`. Verified V18.

@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.2.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.2.1: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)

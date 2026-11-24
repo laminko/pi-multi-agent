@@ -16,7 +16,7 @@ const pi = spawn("pi", ["--mode", "rpc", "--no-session", "--model", model, "--th
 });
 const send = (o: object) => pi.stdin.write(`${JSON.stringify(o)}\n`);
 
-let waits = 0;
+let waits = 0; // worker_wait calls plus wait=true on worker_spawn / worker_send
 let toasts = 0;
 let agentEnds = 0;
 let lastText = "";
@@ -25,7 +25,7 @@ const deadline = setTimeout(() => done(), 150_000);
 function done() {
 	clearTimeout(deadline);
 	const fails: string[] = [];
-	if (waits !== 0) fails.push(`worker_wait calls ${waits}, expected 0`);
+	if (waits !== 0) fails.push(`blocking waits ${waits}, expected 0`);
 	if (toasts !== 1) fails.push(`notify toasts ${toasts}, expected 1`);
 	if (agentEnds < 2) fails.push(`agent_end ${agentEnds}, expected >= 2`);
 	console.log(`[result] worker_wait=${waits} toasts=${toasts} agent_end=${agentEnds}`);
@@ -51,7 +51,7 @@ readline.createInterface({ input: pi.stdout }).on("line", (line) => {
 	}
 	if (ev.type === "tool_execution_start") {
 		console.log(`[tool start] ${ev.toolName}`);
-		if (ev.toolName === "worker_wait") waits++;
+		if (ev.toolName === "worker_wait" || ev.args?.wait === true) waits++;
 	}
 	if (ev.type === "message_end" && ev.message?.role === "assistant") {
 		const t = (ev.message.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");

@@ -29,6 +29,7 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Smoke-test the worker layer | `node scripts/smoke-worker.ts` |
 | Test: typing interrupts `worker_wait` | `node scripts/test-wait-interrupt.ts` (T7) |
 | Test: manager does not wait; result auto-reported | `node scripts/test-auto-report.ts` (T8) |
+| Test: interrupt in the interactive TUI | tmux recipe (T9) |
 
 ## Prerequisites
 
@@ -160,6 +161,7 @@ About $0.01, 20 s. Runs a manager over RPC with the installed extension.
 
 ```bash
 node scripts/test-wait-interrupt.ts     # optional arg: model, default claude-code/claude-haiku-5-5
+TEST_MODE=follow_up node scripts/test-wait-interrupt.ts   # the Alt+Enter path
 ```
 
 The manager spawns a worker that sleeps 60 s, then calls `worker_wait`. After 3 s the test sends a steer message.
@@ -175,6 +177,24 @@ node scripts/test-auto-report.ts
 ```
 
 **Expected:** `worker_wait=0 toasts=1 agent_end=2`, the manager's summary of the result, then `PASS`.
+The `worker_wait` count also includes `wait: true` on `worker_spawn` and `worker_send`.
+
+### T9. Interactive TUI interrupt (tmux)
+
+About $0.01, 90 s.
+
+```bash
+tmux new-session -d -s tuitest -x 160 -y 50 -c "$PWD" "pi --no-session --model claude-code/claude-haiku-5-5 --thinking off"
+tmux send-keys -t tuitest -l 'I ask you to wait. 1) worker_spawn name "s3", tools "bash", task "Run: sleep 20. Then reply done." 2) worker_wait names ["s3"] timeoutSeconds 120.'
+tmux send-keys -t tuitest Enter
+# when the pane shows "Waiting for 1/1":
+tmux send-keys -t tuitest -l 'Master here: say OK.'; tmux send-keys -t tuitest M-Enter   # or Enter for steer
+tmux capture-pane -p -S -300 -t tuitest | rg -n 'Wait stopped|OK|Worker s3 done|⚑ worker s3'
+tmux kill-session -t tuitest
+```
+
+**Expected:** `Wait stopped because the user sent a message` within 1 s, the manager answers `OK`, then the toast
+`Worker s3 done` (no `Warning:` prefix), and then `⚑ worker s3 done`.
 
 ## Operating a session
 
