@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 584" width="1200" height="584" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-labelledby="t d">
+<title id="t">How pi-multi-agent works</title>
+<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. A live view shows each worker's thinking, tool calls and cost.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748B"/></marker><pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#111A2B" stroke-width="1"/></pattern></defs>
+<rect width="1200" height="584" fill="#060A14"/>
+<circle cx="46" cy="43" r="6" fill="#22D3EE"/>
+<text x="62" y="50" font-size="24" font-weight="700" fill="#F8FAFC" text-anchor="start">How pi-multi-agent works</text>
+<text x="62" y="76" font-size="14" font-weight="400" fill="#94A3B8" text-anchor="start">Your pi hands self-contained tasks to worker pis and keeps talking with you.</text>
+<rect x="20" y="102" width="1160" height="462" rx="16" fill="#0B1220" stroke="#1E293B"/>
+<rect x="21" y="103" width="1158" height="460" rx="15" fill="url(#g)"/>
+<rect x="720" y="132" width="436" height="352" rx="14" fill="#07181A" stroke="#10B981" stroke-width="1.5" stroke-dasharray="7 6"/>
+<text x="740" y="160" font-size="12" font-weight="700" fill="#6EE7B7" text-anchor="start">WORKERS · separate pi processes</text>
+<text x="740" y="180" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">own context, model and tools · never see your chat</text>
+<rect x="778" y="206" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
+<text x="938" y="232" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker A</text>
+<text x="938" y="253" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">reviewing the API</text>
+<rect x="778" y="296" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
+<text x="938" y="322" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker B</text>
+<text x="938" y="343" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">writing tests</text>
+<rect x="778" y="386" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
+<text x="938" y="412" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker C</text>
+<text x="938" y="433" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">updating the docs</text>
+<rect x="40" y="262" width="140" height="64" rx="12" fill="#1E293B" stroke="#94A3B8" stroke-width="2"/>
+<text x="110" y="289" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">You</text>
+<text x="110" y="310" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">chat as usual</text>
+<rect x="310" y="246" width="220" height="96" rx="12" fill="#0B2A33" stroke="#22D3EE" stroke-width="2"/>
+<text x="420" y="280" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Your pi</text>
+<text x="420" y="301" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">the manager</text>
+<text x="420" y="319" font-size="11" font-weight="700" fill="#67E8F9" text-anchor="middle">+ pi-multi-agent</text>
+<rect x="310" y="412" width="220" height="72" rx="12" fill="#2A1E08" stroke="#FBBF24" stroke-width="2"/>
+<text x="420" y="443" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Live view</text>
+<text x="420" y="464" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">widget · /workers · logs</text>
+<path d="M182 294H308" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#a)"/>
+<text x="245" y="284" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">chat</text>
+<text x="245" y="314" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">never blocked</text>
+<path d="M532 276H718" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="625" y="265" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">self-contained tasks</text>
+<path d="M718 314H532" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#a)"/>
+<text x="625" y="336" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">results, when ready</text>
+<path d="M718 448H532" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/>
+<text x="625" y="437" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">live updates</text>
+<text x="625" y="470" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">thinking · tools · cost</text>
+<path d="M308 448H110V328" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/>
+<text x="215" y="437" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">you watch</text>
+<path d="M720 526H764" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/><text x="776" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">task</text>
+<path d="M870 526H914" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#a)"/><text x="926" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">result</text>
+<path d="M1020 526H1064" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/><text x="1076" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">live update</text>
+</svg>

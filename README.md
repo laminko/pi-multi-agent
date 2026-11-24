@@ -3,18 +3,10 @@
 Let your [pi](https://github.com/earendil-works/pi) hand work to other pi agents that run in parallel, and watch
 them think while they work.
 
-```mermaid
-sequenceDiagram
-    actor You
-    participant M as Your pi (manager)
-    participant W as Workers
-    You->>M: a task with independent parts
-    M->>W: one self-contained task per worker
-    Note over W: Each worker is its own pi process<br/>and never sees your conversation.
-    M-->>You: keeps talking with you
-    W-->>M: results, as each one finishes
-    M-->>You: reports the results
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
+  <img src="docs/assets/how-it-works-light.svg" alt="You chat with your pi, the manager. It sends self-contained tasks to worker pis, separate processes with their own context, model and tools, and gets their results back when ready. A live view shows each worker's thinking, tool calls and cost." width="100%">
+</picture>
 
 ## Install
 
