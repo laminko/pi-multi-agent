@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.3.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.4.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -174,6 +174,21 @@ is per task.
 | `a` | Abort the worker's current task |
 | `k` | Kill the worker (asks for confirmation) |
 | `Esc`, `Ctrl+C`, `q` | Close |
+
+## Mouse
+
+Mouse input works only in pi's fullscreen mode (`tuiMode: "fullscreen"`, the default). In regular mode the terminal
+keeps the mouse, so use the keys. Every mouse action also has a key.
+
+| Where | Mouse | Action |
+|---|---|---|
+| Widget, worker row | Left click | Open the viewer on that worker |
+| Widget, summary or column header | Left click | Open the viewer on the first worker |
+| Viewer, tab bar (line 1) | Left click on a tab | Switch to that worker |
+| Viewer, any line | Wheel | Scroll the transcript |
+| Viewer, help line (last line) | Left click on `End follow`, `m message`, `a abort`, `k kill`, `esc close` | The same as the key |
+
+Right and middle clicks are not used. A drag is not used, so pi's text selection still works.
 
 ## Worker statuses
 

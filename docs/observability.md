@@ -45,10 +45,12 @@ in pi. The `Now` column is a live preview:
 
 In RPC hosts (pi-web, IDE integrations) the widget is sent as plain text and refreshed about once per second.
 
+In fullscreen mode, click a worker row to open the viewer on that worker. See [Mouse](reference.md#mouse).
+
 ## `/workers` viewer
 
 ```
- beta  ● running  worker 2/2
+  ● alpha   [ beta ] ● running  worker 2/2
  1 turns · 0 tools · ctx 4.1k · ↑2 ↓1.3k · $0.03 · 12s
  claude-code/default (high) · log: ~/.pi/agent/multi-agent/runs/…/beta.log
  ⟳ thinking
@@ -61,8 +63,11 @@ In RPC hosts (pi-web, IDE integrations) the widget is sent as plain text and ref
 ▶ bash $ npm test
   ✓ (2.3s) 42 passing
 ──────────────────────────────────────────────────────────────
- ←/→ worker · ↑/↓ PgUp/PgDn scroll · End follow · m message · a abort · k kill · esc close
+ ←/→ or click tab · ↑/↓ PgUp/PgDn wheel scroll · End follow · m message · a abort · k kill · esc close
 ```
+
+The first line is a tab bar, one tab per worker. In fullscreen mode, click a tab to switch, use the wheel to scroll,
+and click an action on the last line.
 
 - The header shows status, stats, model and thinking level, the log path, and the current activity or error.
 - The body follows live output; scrolling up pauses following (`⏸ scrolled N`), and `End` resumes it.
