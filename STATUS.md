@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.1.0 |
+| **Version** | 0.2.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -13,7 +13,8 @@
 |---|---|---|
 | Worker RPC layer (`worker.ts`) | ✅ Done · verified | Spawn, handshake, tasks, events → state, logs, abort, crash detection, shutdown |
 | Manager tools | ✅ Done · mostly verified | `worker_spawn`, `worker_wait`, `worker_status` used by a real manager LLM. `worker_send` was verified for idle workers only. `worker_stop` was not driven by an LLM yet (its underlying abort/stop is verified) |
-| Auto-notify | ✅ Done · verified | The result is delivered and the manager reacts on its own |
+| Auto-notify | ✅ Done · verified | The result is delivered and the manager reacts on its own. A user toast shows for each finished worker (V15) |
+| Non-blocking manager | ✅ Done · verified | The manager does not wait after a spawn (V15). Typing ends a `worker_wait` in < 1 s (V14) |
 | Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message. The `a`/`k` keys were not exercised |
 | Slash commands | ⚠️ Partly verified | `/workers` verified; `/worker-send`, `/worker-stop` and `/workers-clear` not exercised |
@@ -42,13 +43,17 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V11 | Shutdown cleanup | every run above | ✅ All workers exited with code 0 when their manager ended; 0 orphan processes |
 | V12 | Event log compaction | before/after the fix | ✅ ~40 KB for a 2-turn task before; ~14 KB for 3 tasks after |
 | V13 | Doc recipes | every `jq` command in docs/observability.md, run against real logs | ✅ All work |
+| V14 | Typing interrupts `worker_wait` | `scripts/test-wait-interrupt.ts` (T7), `claude-code/claude-haiku-5-5` | ✅ `outcome=interrupted`, 211 ms after the steer; 1 of 1 worker still running |
+| V15 | No wait after spawn; toast; auto-report | `scripts/test-auto-report.ts` (T8) | ✅ 0 `worker_wait` calls; 1 toast `Worker sleeper done`; 2 `agent_end`; the manager reported the result |
 
 ## Not yet verified
 
 - Dialog forwarding (`select`/`confirm`/`input`/`editor`) from extensions running inside workers.
 - `worker_send` with `steer` / `followUp` while a worker is busy (RPC `steer` / `follow_up`).
 - `worker_stop` called by the manager LLM; `/worker-send`, `/worker-stop`, `/workers-clear`; viewer keys `a` and `k`.
-- `worker_wait` timeout and `Esc`-cancel paths.
+- `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14.)
+- The interrupt with a `followUp` message (`Alt+Enter`). Only `steer` was tested.
+- The interrupt and the toast in the interactive TUI. V14 and V15 ran over RPC.
 - `PI_MULTI_AGENT_MAX_WORKERS`, `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`.
 - Retry and compaction events inside long-running workers.
 - A manager hosted by pi-web; Linux; Windows.
@@ -111,3 +116,7 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - Initialized the git repo; baseline commit on `main`.
 - Docs: README rewrite, STATUS (this file), RUNBOOK, and `docs/` (user guide, observability, architecture,
   reference). Verified the doc recipes (V13). Merged branch `docs/readme-status-runbook` into `main`.
+- v0.2.0, non-blocking manager. Issue: a user message typed during `worker_wait` waited up to 1800 s, so the user
+  could not steer workers through the manager. Fix: the wait returns `interrupted` on a pending user message; the
+  manager is told not to wait after a spawn; each finished worker shows a toast. Verified V14 and V15.
+  Added `INDEX.md` and `CHANGELOG.md`.

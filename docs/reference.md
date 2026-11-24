@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.1.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.2.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -31,10 +31,11 @@ Starts a new worker process and sends it `task` as its first prompt.
 | `tools` | string | pi's default tools | Comma-separated allowlist, passed as `--tools` (e.g. `read,grep,find,ls`). |
 | `cwd` | string | manager's cwd | Relative paths resolve against the manager's cwd. Must exist. |
 | `wait` | boolean | `false` | `true`: block until the worker settles and return its result. |
-| `notify` | boolean | `true` | Auto-deliver the result to the manager when the worker finishes and nobody is waiting on it. |
+| `notify` | boolean | `true` | Auto-deliver the result to the manager when the worker finishes and nobody is waiting on it. The user also gets a toast, `Worker <name> <status>`, for every finished task (with or without `notify`). |
 | `timeoutSeconds` | number | `1800` | Only with `wait: true`. |
 
-Returns, without `wait`: `Started worker "<name>" (pid, model, thinking)` plus the live log path.
+Returns, without `wait`: `Started worker "<name>" (pid, model, thinking)` plus the live log path, and a hint
+that tells the manager not to wait. The manager then ends its turn, so you can talk to it while the worker runs.
 With `wait`: a [result block](#result-format).
 
 Errors: the name belongs to a live worker · the live worker limit is reached · `cwd` does not exist · the worker failed
@@ -58,6 +59,7 @@ is cleared. Errors: unknown worker · worker not alive (stopped or crashed).
 ### `worker_wait`
 
 Waits until workers settle, then returns their [result blocks](#result-format) and marks them reported.
+The manager is told to call it only when you ask it to wait. By default, results arrive by auto-notify.
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
@@ -67,9 +69,16 @@ Waits until workers settle, then returns their [result blocks](#result-format) a
 Default targets: every busy worker, plus every finished worker whose result has not been reported yet (and that is
 not being stopped). With no targets, it returns the status of all workers immediately.
 
-While waiting, it streams a status table about once per second. Pressing `Esc` in the manager cancels only the
-wait: the workers keep running. On timeout or cancel, finished workers are reported and running ones are listed
-with their current activity.
+While waiting, it streams a status table about once per second. The wait ends early in two cases. The workers
+keep running in both:
+
+- **You type a message** (outcome `interrupted`). The wait checks `ctx.hasPendingMessages()` on each 400 ms poll.
+  It returns in under 1 s, and the manager then reads your message. It can pass the message on with `worker_send`.
+- **You press `Esc`** (outcome `aborted`).
+
+On timeout, interrupt or cancel, finished workers are reported and running ones are listed with their current
+activity. Running workers auto-notify later. The same early return applies to `worker_spawn` and `worker_send`
+with `wait: true`.
 
 ### `worker_status`
 

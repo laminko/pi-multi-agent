@@ -42,13 +42,15 @@ While they run:
   it, `a` aborts, `k` kills;
 - **`scripts/watch.sh`** follows the live logs from another terminal.
 
-If the manager does not wait, each result is delivered to it automatically when the worker finishes.
+The manager does not block while workers run, so you can keep talking to it. When a worker finishes, you get a
+toast, and the result is delivered to the manager automatically. The manager then reports it to you.
 
 ## Features
 
 - Parallel workers with independent context, model, thinking level, tools (`read,grep,find,ls` = read-only) and role
 - Long-lived workers: give follow-up work, steer mid-task, abort without killing
-- Auto-notification of results, or explicit `worker_wait` with live progress
+- Non-blocking manager: auto-notification of results and a toast per finished worker. `worker_wait` (live progress)
+  only on request, and typing a message interrupts it
 - Live visibility: widget, `/workers` viewer, streamed `.log` files, compact `.events.jsonl`, final `.result.md`,
   and a persisted pi session per worker (viewable in pi or pi-web)
 - Worker dialogs (e.g. permission prompts from your extensions) are forwarded to you
@@ -77,8 +79,10 @@ extensions/multi-agent/
 scripts/
   watch.sh          tail worker logs from another terminal
   smoke-worker.ts   smoke test for the worker RPC layer (node scripts/smoke-worker.ts)
+  test-wait-interrupt.ts  end-to-end: typing interrupts worker_wait (RUNBOOK T7)
+  test-auto-report.ts     end-to-end: no wait after spawn, result auto-reported (RUNBOOK T8)
 docs/            user guide, observability, reference, architecture
-RUNBOOK.md  STATUS.md  package.json (pi package manifest)
+RUNBOOK.md  STATUS.md  CHANGELOG.md  INDEX.md  package.json (pi package manifest)
 ```
 
 ## Requirements

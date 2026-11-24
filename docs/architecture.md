@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.1.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.2.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
@@ -123,12 +123,18 @@ manager UI. `setStatus`, `setWidget`, `setTitle` and `set_editor_text` are ignor
   - set to `true` by `worker_wait` results, by the `worker_stop` tool, by any kill, by shutdown, and by an
     auto-notification. Aborts you trigger yourself (viewer `a`, `/worker-stop <name>` without `kill`) leave it `false`,
     so the manager is told that its worker was aborted.
+- **User toast** (`onSettled`), when a worker settles and is not `stopping`: `ctx.ui.notify("Worker <name> <status>")`,
+  `info` for done and `warning` otherwise. This shows at once, even while the manager is in a turn.
 - **Auto-notify** (`onSettled`), when a worker settles: skip if it is `stopping`, already `reported`, or has `notify`
   set to `false`, **or if any `worker_wait` call is currently waiting on it** (tracked with a per-name waiter count).
   Otherwise it calls `pi.sendMessage({customType: "multi-agent", …}, {deliverAs: "followUp", triggerTurn: true})`.
   An idle manager starts a turn right away. A busy manager gets the message after its current run.
 - **Waiting** is a 400 ms poll of `busy` across the target workers, with an abort-aware sleep and a progress update
-  at most once per second. Polling the authoritative flag is simpler and more robust than coordinating
+  at most once per second. Each poll also checks `ctx.hasPendingMessages()`. If the user queued a steer or
+  follow-up message, the wait returns `interrupted`. Pi delivers a steer message only after the current tool call
+  ends, so without this check a user message waited up to the full timeout (1800 s).
+- **Manager prompting.** The `worker_spawn` guidelines tell the manager to end its turn after a spawn, and to call
+  `worker_wait` only when the user asks. The manager then stays free to talk, and results come by auto-notify. Polling the authoritative flag is simpler and more robust than coordinating
   one-shot events: a `settled` that fires before the waiter subscribes cannot be missed.
 
 ## UI
@@ -177,6 +183,7 @@ If the manager process dies without running this, the workers' stdin closes and 
 | Persist worker sessions by default | full transcript with thinking, viewable in pi and pi-web | `--no-session` (still available through `PI_MULTI_AGENT_WORKER_ARGS`) |
 | Auto-notify with `followUp` + `triggerTurn` | the manager can fire and forget; results are never lost | only `worker_wait` (forces the manager to block) |
 | Polling wait | robust, no missed-event races, trivial to cancel | event-driven promises |
+| Do not wait by default; interrupt a wait on user input | the user can always talk to the manager and steer workers through it | wait by default (v0.1.0): blocked the user for up to 30 min |
 | Recursion guard through an env var | workers load the same packages | process-tree depth tracking |
 | Logs outside the repo (`~/.pi/agent/multi-agent`) | no pollution of projects or git status | `<cwd>/.pi/…` |
 | Tools allowlist + role prompt, no sandbox | matches pi's own model; simple | containers / worktrees (roadmap) |

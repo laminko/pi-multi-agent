@@ -27,6 +27,8 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Logs of the latest run | `ls ~/.pi/agent/multi-agent/latest/` |
 | List live worker processes | `ps aux \| grep -E -- '[-]-name worker:'` |
 | Smoke-test the worker layer | `node scripts/smoke-worker.ts` |
+| Test: typing interrupts `worker_wait` | `node scripts/test-wait-interrupt.ts` (T7) |
+| Test: manager does not wait; result auto-reported | `node scripts/test-auto-report.ts` (T8) |
 
 ## Prerequisites
 
@@ -152,6 +154,28 @@ ps aux | grep -E -c -- '[-]-name worker:'      # expected: 0
 6. Press `m`, type `Reply with just the word: ack`, Enter. The viewer reopens and shows `✉ …` and `│ ack`.
 7. `Esc` closes the viewer, and the widget is back. Quit pi, then run T5.
 
+### T7. Typing interrupts `worker_wait`
+
+About $0.01, 20 s. Runs a manager over RPC with the installed extension.
+
+```bash
+node scripts/test-wait-interrupt.ts     # optional arg: model, default claude-code/claude-haiku-5-5
+```
+
+The manager spawns a worker that sleeps 60 s, then calls `worker_wait`. After 3 s the test sends a steer message.
+
+**Expected:** `outcome=interrupted latency_ms=<1000 workers_still_running=1`, then `PASS`.
+
+### T8. No wait after spawn; result auto-reported
+
+About $0.01, 25 s.
+
+```bash
+node scripts/test-auto-report.ts
+```
+
+**Expected:** `worker_wait=0 toasts=1 agent_end=2`, the manager's summary of the result, then `PASS`.
+
 ## Operating a session
 
 **Start.** Open pi with the extension, and ask the manager to delegate. Tips for good worker tasks are in the
@@ -170,7 +194,7 @@ ps aux | grep -E -c -- '[-]-name worker:'      # expected: 0
 | Worker going in the wrong direction | Viewer `m` (or `/worker-send <name> …`) with a correction. It is delivered after the worker's current step |
 | Worker stuck on a long tool call | Viewer `a` to abort the task. The worker stays usable; then send new instructions |
 | Worker misbehaving or no longer needed | Viewer `k`, or `/worker-stop <name> kill` |
-| Manager blocked in a long `worker_wait` | `Esc` in the manager. This cancels the wait only; the workers keep running |
+| Manager blocked in a long `worker_wait` | Type your message. The wait stops within 1 s, and the manager reads it. `Esc` also works. The workers keep running in both cases |
 | Too many results flooding the manager | Ask it to use `notify: false` and collect with `worker_wait` |
 
 **End.** Quitting the manager (or `/new`, `/resume`, `/reload`) stops all workers. Transcripts remain in
