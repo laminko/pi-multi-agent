@@ -1,7 +1,8 @@
 # Runbook
 
 Operational procedures for pi-multi-agent: install, verify, operate, troubleshoot, maintain.
-Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `~/.pi/agent`.
+Commands assume pi's agent dir is `~/.pi/agent`. The package source is `git:github.com/laminko/pi-multi-agent`;
+commands that run `scripts/…` or `./extensions/…` assume a clone of the repository as the current directory.
 
 - [Cheat sheet](#cheat-sheet)
 - [Prerequisites](#prerequisites)
@@ -17,8 +18,9 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 
 | Task | Command |
 |---|---|
-| Try for one session | `pi -e /path/to/pi-multi-agent/extensions/multi-agent/index.ts` |
-| Install for all sessions | `pi install /path/to/pi-multi-agent` |
+| Try for one session | `pi -e git:github.com/laminko/pi-multi-agent` |
+| Install for all sessions | `pi install git:github.com/laminko/pi-multi-agent` |
+| Update / uninstall | `pi update git:github.com/laminko/pi-multi-agent` / `pi remove git:github.com/laminko/pi-multi-agent` |
 | Watch workers live (in pi) | `/workers` or `/workers <name>` |
 | Watch from another terminal | `scripts/watch.sh [name]` |
 | Status table and column legend (in pi) | `/workers-legend` |
@@ -51,27 +53,45 @@ A model must be configured in pi. Workers use the manager's model unless told ot
 
 ## Install, upgrade, uninstall
 
-**Try without installing** (nothing is written to settings):
+**Try without installing** (nothing is written to settings; pi caches the clone in `~/.pi/agent/tmp/extensions/`):
 
 ```bash
-pi -e /path/to/pi-multi-agent/extensions/multi-agent/index.ts
+pi -e git:github.com/laminko/pi-multi-agent
 ```
 
 **Install globally** (`~/.pi/agent/settings.json`) or **per project** (`.pi/settings.json`; requires project trust):
 
 ```bash
-pi install /path/to/pi-multi-agent
-pi install -l /path/to/pi-multi-agent
+pi install git:github.com/laminko/pi-multi-agent
+pi install -l git:github.com/laminko/pi-multi-agent
 pi list                                   # verify it is listed
 ```
 
-Running pi sessions pick it up after `/reload`. Reloading stops any running workers.
+To pin a version, append a tag or commit: `git:github.com/laminko/pi-multi-agent@<ref>`. Running pi sessions pick
+the extension up after `/reload`. Reloading stops any running workers; busy ones can be resumed with
+`/workers-resume`.
 
-**Verify** in a new pi session. Type `/work` and the completions should show `/workers`, `/worker-send`,
-`/worker-stop` and `/workers-clear`. Or run [T1](#t1-extension-loads).
+**From a clone** (for development):
 
-**Upgrade the extension:** pull or edit the repo, then `/reload` in running sessions (stops their workers).
-A local path install is used in place, so there is nothing to reinstall.
+```bash
+git clone https://github.com/laminko/pi-multi-agent.git && cd pi-multi-agent
+pi -e ./extensions/multi-agent/index.ts   # this session only; or `pi install .` to use the clone in place
+```
+
+Load only one copy. With the package installed and a clone loaded through `-e`, both register the same tools and
+one of them fails to load (see [Troubleshooting](#troubleshooting)).
+
+**Verify** in a new pi session. Type `/work` and the completions should show `/workers`, `/workers-legend`,
+`/workers-resume`, `/worker-send`, `/worker-stop` and `/workers-clear`. Or run [T1](#t1-extension-loads).
+
+**Upgrade the extension:**
+
+```bash
+pi update git:github.com/laminko/pi-multi-agent   # or `pi update --extensions` for all packages
+```
+
+Then `/reload` running sessions. A pinned `@<ref>` does not move: change the ref to upgrade. A clone installed by
+path is used in place: `git pull`, then `/reload`.
 
 **After upgrading pi:** run [T1](#t1-extension-loads), [T2](#t2-worker-rpc-layer) and [T4](#t4-manager-end-to-end).
 The extension depends on pi's RPC protocol and extension API; the list is in
@@ -80,7 +100,7 @@ The extension depends on pi's RPC protocol and extension API; the list is in
 **Uninstall:**
 
 ```bash
-pi remove /path/to/pi-multi-agent      # add -l if installed per project
+pi remove git:github.com/laminko/pi-multi-agent      # add -l if installed per project
 ```
 
 Logs and worker sessions are not removed; see [Maintenance](#maintenance).
@@ -319,6 +339,7 @@ First look at the worker's files: `~/.pi/agent/multi-agent/latest/<name>.log` (w
 | `worker_spawn` error: `failed to start: … get_state timed out` | pi took more than 120 s to start (package install or update, slow network, project trust prompt) | Check `<name>.stderr.log`. Run `pi --mode rpc --no-session` by hand in the same cwd and look for prompts or errors. Retry |
 | `failed to start: pi exited (code 1 …)` | Bad worker args: unknown `--model`, invalid `--tools`, bad `PI_MULTI_AGENT_WORKER_ARGS` | The error includes the stderr tail. Check `pi --list-models` and the arguments in the `cmd:` line of `<name>.log` |
 | `Worker "x" already exists` | Name in use by a live worker | Use `worker_send`, choose another name, or kill it first |
+| `Failed to load extension … Tool "worker_spawn" conflicts with …` | The extension is loaded twice: an installed package plus `-e`, or two installs | Keep one copy: check `pi list`, then `pi remove` the extra one, or drop the `-e` |
 | `Too many live workers (8/8)` | Limit reached; idle workers count too | Kill idle workers (`/worker-stop <name> kill`) or set `PI_MULTI_AGENT_MAX_WORKERS` before starting pi |
 | Worker shows `waiting for model` for a long time | Provider latency, rate limits, or a very large context | Look in `<name>.log` for `• retry …` lines. Steer with a narrower task, or abort and respawn on another model |
 | Worker shows `waiting for you: …` | An extension inside the worker opened a dialog | Answer the `[worker <name>] …` dialog in the manager UI. In print mode dialogs are auto-cancelled |

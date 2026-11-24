@@ -140,10 +140,10 @@ ls ~/.pi/agent/multi-agent/latest/
 
 ```
 ████ 3:33:47 AM worker "counter" starting
-cwd: /path/to/pi-multi-agent
+cwd: /path/to/project
 cmd: …/node …/pi --mode rpc --name worker:counter --model claude-code/default --thinking low --tools bash,read
 model: claude-code/default (thinking low)
-session: ~/.pi/agent/sessions/--path-to-pi-multi-agent--/2026-11-23T20-33-47-420Z_….jsonl
+session: ~/.pi/agent/multi-agent/sessions/2026-11-23T20-33-47-420Z_….jsonl
 
 ━━━━ 3:33:47 AM TASK ━━━━
 Count the .ts files under the extensions/ directory … Reply with just the number.
