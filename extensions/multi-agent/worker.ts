@@ -15,7 +15,24 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
-export type WorkerStatus = "starting" | "running" | "idle" | "error" | "aborted" | "stopped" | "crashed";
+/**
+ * "interrupted": restored from the manager's session after pi quit while the worker was busy. There is no process;
+ * worker_resume / /workers-resume starts a new one on the worker's own session file.
+ */
+export type WorkerStatus =
+	| "starting"
+	| "running"
+	| "idle"
+	| "error"
+	| "aborted"
+	| "stopped"
+	| "crashed"
+	| "interrupted";
+
+/** Payload of the "record" event: persistent state changed. `task` is set when a new task starts. */
+export interface RecordEvent {
+	task?: string;
+}
 
 export type EntryKind = "task" | "message" | "thinking" | "text" | "tool" | "toolResult" | "info" | "error";
 
@@ -55,6 +72,10 @@ export interface WorkerConfig {
 	extraArgs?: string[];
 	/** Notify the manager (and trigger a turn) when a task finishes and nobody is waiting on it. */
 	notify: boolean;
+	/** Open this existing session file (resume) instead of creating a new session. */
+	sessionFile?: string;
+	/** Create the new session in this directory (`--session-dir`). Ignored with `sessionFile`. */
+	sessionDir?: string;
 }
 
 export interface WorkerUsage {
@@ -267,6 +288,8 @@ export class Worker extends EventEmitter {
 		this.stderrLog = fs.createWriteStream(this.stderrPath, { flags: "a" });
 
 		const args = ["--mode", "rpc", "--name", `worker:${this.name}`];
+		if (this.config.sessionFile) args.push("--session", this.config.sessionFile);
+		else if (this.config.sessionDir) args.push("--session-dir", this.config.sessionDir);
 		if (this.config.model) args.push("--model", this.config.model);
 		if (this.config.thinking) args.push("--thinking", this.config.thinking);
 		if (this.config.tools) args.push("--tools", this.config.tools);
@@ -396,6 +419,8 @@ export class Worker extends EventEmitter {
 		this.addEntry(label === "TASK" ? "task" : "message", text);
 		this.writeLog(`\n━━━━ ${clock()} ${label} ━━━━\n${text}\n`);
 		this.changed();
+		// Record before sending, so a quit at any later moment finds the worker busy. A resume prompt is not a new task.
+		this.emit("record", (label === "RESUME" ? {} : { task: text }) satisfies RecordEvent);
 		try {
 			const data = await this.request({ type: "prompt", message: text });
 			if (data?.disposition === "handled") {
@@ -404,6 +429,7 @@ export class Worker extends EventEmitter {
 				this.activity = "prompt was handled by an extension command";
 				this.taskFinishedAt = Date.now();
 				this.changed();
+				this.emit("record", {} satisfies RecordEvent);
 			}
 		} catch (error) {
 			this.busy = false;
@@ -412,6 +438,7 @@ export class Worker extends EventEmitter {
 			this.activity = `error: ${this.errorMessage}`;
 			this.taskFinishedAt = Date.now();
 			this.changed();
+			this.emit("record", {} satisfies RecordEvent);
 			throw error;
 		}
 	}
@@ -695,6 +722,7 @@ export class Worker extends EventEmitter {
 			/* ignore */
 		}
 		this.changed();
+		this.emit("record", {} satisfies RecordEvent);
 		this.emit("settled", this);
 	}
 
@@ -725,6 +753,7 @@ export class Worker extends EventEmitter {
 		this.events?.end();
 		this.stderrLog?.end();
 		this.changed();
+		this.emit("record", {} satisfies RecordEvent);
 		if (wasBusy) this.emit("settled", this);
 		this.emit("exit", this);
 	}

@@ -33,6 +33,8 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Test: interrupt in the interactive TUI | tmux recipe (T9) |
 | Test: widget and viewer with many workers (no model calls) | `node scripts/test-ui-overflow.ts` (T10) |
 | Test: result blocks parse and render (no model calls) | `node scripts/test-render-report.ts` (T11) |
+| Test: resume records and session repair (no model calls) | `node scripts/test-resume.ts` (T12) |
+| **pi quit while workers ran** | `pi -c`, then `/workers-resume` ([details](#recovering-after-pi-quits)) |
 
 ## Prerequisites
 
@@ -232,6 +234,30 @@ drawn table, Markdown in the result, the collapsed hint, the legend's alignment,
 To see it live (under $0.01 with haiku): ask the manager to spawn one worker whose task is to reply with a Markdown
 report, and not to wait. The `⚑ worker … done` message shows a drawn table and the rendered report; `ctrl+o` expands it.
 
+### T12. Resume after quit
+
+Free, 1 s. No model calls; the session files are real (pi's `SessionManager`) in a temp directory.
+
+```bash
+node scripts/test-resume.ts
+```
+
+**Expected:** 10 `PASS` lines and `all passed`: record merging (only workers busy at their last record are
+interrupted; later records keep earlier fields; the latest task wins), session repair (an unanswered tool call gets an
+error result, a second run changes nothing, only the unanswered one of two parallel calls is fixed, clean sessions are
+left alone), and the old-process check.
+
+**Live (about $0.01 with haiku, 2 min):** in an empty directory, start the manager and ask for one worker whose task
+is `Step 1: echo one > step1.txt. Step 2: sleep 25. Step 3: echo three > step3.txt. Then reply finished-all-steps`.
+When its log shows `▶ bash $ sleep 25`, close the terminal (or `tmux kill-server`). Then:
+
+1. `pi -c` opens the **manager** (not a worker) and shows `↯ 1 interrupted (/workers-resume)` in the widget.
+2. `/workers-resume` → `resumer: resumed in its own session`.
+3. The worker checks the files, re-runs only the sleep and step 3, and the `⚑ worker … done` result is
+   `finished-all-steps`. `step3.txt` exists. The manager's reply does not claim that the worker is not running.
+4. Repeat the quit, then ask in plain words (`My workers got interrupted. Please continue them.`): the manager calls
+   `worker_resume`, and a single `worker_wait` returns the result.
+
 ## Operating a session
 
 **Start.** Open pi with the extension, and ask the manager to delegate. Tips for good worker tasks are in the
@@ -254,7 +280,34 @@ report, and not to wait. The `⚑ worker … done` message shows a drawn table a
 | Too many results flooding the manager | Ask it to use `notify: false` and collect with `worker_wait` |
 
 **End.** Quitting the manager (or `/new`, `/resume`, `/reload`) stops all workers. Transcripts remain in
-`~/.pi/agent/multi-agent/runs/<run>/` and in the worker session files.
+`~/.pi/agent/multi-agent/runs/<run>/` and in the worker session files. Workers that were busy can be resumed later:
+see the next section.
+
+## Recovering after pi quits
+
+When pi quits while workers run (Ctrl+C, Ctrl+D, a closed terminal, `/reload`, or a crash), the worker processes
+stop. Their work is resumable, as long as the manager session was saved (not `--no-session`).
+
+1. **Reopen the manager session.** `pi -c` in the same directory (add `-e …/index.ts` if the extension is not
+   installed), or `pi -r` and pick it. With workers from before v0.7.0, `pi -c` may open a worker session (named
+   `worker:<name>`) instead; then use `pi -r` and pick the session that is not named `worker:…`.
+2. **Check what was interrupted.** A toast lists the workers; the widget shows them as `↯ interrupted`;
+   `/workers <name>` shows the task they were working on and the path of the interrupted run's log.
+3. **Check the files.** Interrupted workers may have left half-done edits: `git status` / `git diff`.
+4. **Resume.** `/workers-resume` (all) or `/workers-resume <name>`, or ask the manager to continue them. Each
+   worker continues in its own session, checks what is done, and finishes; the result arrives as `⚑ worker … done`.
+5. **Or drop them.** `/worker-stop <name> kill` or `/workers-clear` dismisses interrupted workers; they are not
+   offered again.
+
+Resume results and what they mean:
+
+| Line | Meaning |
+|---|---|
+| `resumed in its own session` | Normal case |
+| `…; N unfinished tool call(s) marked as not run` | pi quit while the model was making a tool call; the session was repaired first |
+| `had no session file, so it restarted its task` | The worker ran with `--no-session` (or the file is gone); it starts over with its recorded task and a note to check what is done |
+| `its old process (pid N) still runs …` | The manager died hard and the old worker is still finishing. Wait, or `kill N`, then resume again |
+| `not interrupted (…), nothing to resume` | The worker finished, was dismissed, or was already resumed |
 
 ## Troubleshooting
 
@@ -278,7 +331,10 @@ First look at the worker's files: `~/.pi/agent/multi-agent/latest/<name>.log` (w
 | `/workers` shows only a notification | Manager is not in TUI mode (RPC host) | Use the widget, `worker_status`, logs, or `scripts/watch.sh` |
 | `scripts/watch.sh` misses a worker | Its glob is expanded at start | Re-run it, or `scripts/watch.sh <name>` |
 | Extension missing in a project after `pi install -l` | Project not trusted | Trust the project when pi asks, or use a global install |
-| Session list cluttered with `worker:*` sessions | Workers persist sessions by default | `export PI_MULTI_AGENT_WORKER_ARGS="--no-session"` (or `--session-dir <dir>`) before starting pi. Cleanup: [Maintenance](#maintenance) |
+| Session list cluttered with `worker:*` sessions | Workers from before v0.7.0 stored sessions in the project's list | New workers use `~/.pi/agent/multi-agent/sessions/`. Remove the old ones: [Maintenance](#maintenance) |
+| `pi -c` opened a `worker:<name>` session | Worker sessions from before v0.7.0 are in the project's list and can be the newest | Quit it, run `pi -r` and pick the manager. See [Recovering after pi quits](#recovering-after-pi-quits) |
+| A resumed worker fails with `tool_use ids were found without tool_result blocks` | Its session was not repaired (for example resumed by hand with `pi --session`) | Resume it with `/workers-resume`, which repairs the session first |
+| No `↯ interrupted` workers after reopening, although workers were running | The manager ran with `--no-session`, or a different session was opened, or the workers had already finished | Open the right manager session (`pi -r`). Without a saved manager session there is nothing to restore; respawn the tasks |
 
 ## Emergency stop
 
@@ -306,8 +362,17 @@ find ~/.pi/agent/multi-agent/runs -mindepth 1 -maxdepth 1 -type d -mtime +7 -pri
 find ~/.pi/agent/multi-agent/runs -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +     # delete them
 ```
 
-**Worker session files** are named `worker:<name>` in their `session_info` entry. To list them (this skips
-ordinary sessions, even ones that mention workers):
+**Worker session files.** Since v0.7.0, new ones are in `~/.pi/agent/multi-agent/sessions/`
+(`PI_MULTI_AGENT_WORKER_SESSION_DIR`). Keep the sessions of interrupted workers until you have resumed or dismissed
+them: resume needs them.
+
+```bash
+du -sh ~/.pi/agent/multi-agent/sessions
+find ~/.pi/agent/multi-agent/sessions -name '*.jsonl' -mtime +7 -print     # older than 7 days; add -delete to remove
+```
+
+Worker sessions from before v0.7.0 are in pi's normal session directories, named `worker:<name>` in their
+`session_info` entry. To list them (this skips ordinary sessions, even ones that mention workers):
 
 ```bash
 for f in ~/.pi/agent/sessions/*/*.jsonl; do
@@ -316,7 +381,8 @@ done
 ```
 
 Review the list, then delete what you don't need (for example pipe it to `xargs rm` after checking). To stop
-creating them, set `PI_MULTI_AGENT_WORKER_ARGS="--no-session"`.
+creating worker sessions at all, set `PI_MULTI_AGENT_WORKER_ARGS="--no-session"`; resume then restarts a worker's
+task instead of continuing it.
 
 ## Collecting a bug report
 

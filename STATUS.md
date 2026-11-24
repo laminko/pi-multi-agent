@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.6.0 |
+| **Version** | 0.7.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -17,6 +17,7 @@
 | Non-blocking manager | ✅ Done · verified | The manager does not wait after a spawn (V15). Typing ends a `worker_wait` in < 1 s (V14) |
 | Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20). Running workers first; `… N more (…)` past 8 rows (V24, V25) |
 | Mouse (fullscreen) | ✅ Done · verified | Widget row click, viewer tab click, wheel, help-line actions (V22, V23) |
+| Resume after quit | ✅ Done · verified | Records, `↯ interrupted` restore, `/workers-resume`, `worker_resume`, session repair, worker sessions in their own dir (V28–V34) |
 | Result rendering (TUI) | ✅ Done · verified | Worker blocks in tool rows and `⚑` messages: drawn table, Markdown result, no tags (V26, V27) |
 | Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message, tab window for many workers (V24, V25). The `a`/`k` keys were not exercised |
@@ -59,6 +60,13 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V24 | Many workers, rendering logic | `scripts/test-ui-overflow.ts` (T10): fake workers, pi-tui width functions | ✅ 18 of 18: row order, `… 4 more (3 done, 1 stopped)`, `PI_MULTI_AGENT_WIDGET_ROWS=3`, 4 widget clicks, tab window at widths 120/80/60 and long names, 2 marker clicks |
 | V26 | Result rendering, logic | `scripts/test-render-report.ts` (T11): real producer → parser → renderer | ✅ 24 of 24. First run found a parser bug: a result containing `</result>` then `</worker>` ended early. Fixed by requiring the log note in the end marker |
 | V27 | Result rendering, live TUI | tmux 150×60, haiku, 1 worker with a Markdown report, auto-report; then `worker_status` | ✅ `⚑` message: drawn table, heading and bold rendered, `… 7 more lines (ctrl+o to expand)`, `log: ~/…`; `ctrl+o` showed the worker's own table drawn; `worker_status` row: drawn table + aligned legend; T1, T10 pass; 0 orphans |
+| V28 | Resume logic | `scripts/test-resume.ts` (T12): records, real session files | ✅ 10 of 10 |
+| V29 | Repair against the real provider | session ending in an aborted tool call, `pi --session … -p continue`, haiku | ✅ Without repair: the provider's 400 `tool_use ids were found without tool_result blocks`; after `repairSession` (1 result added): `repaired-ok` |
+| V30 | Quit and resume, live | tmux, haiku; worker writes step1, `sleep 25`, step3; SIGHUP mid-sleep; `pi -c`; `/workers-resume` | ✅ Last record `busy: true`; `pi -c` opened the manager; widget `↯ 1 interrupted`; worker resumed **in the same session file**, checked the files, re-ran only the sleep and step 3; `finished-all-steps`; 0 orphans |
+| V31 | Stale note (bug found in V30) | same, after the fix | ✅ Before: the note queued at startup arrived after `/workers-resume` and the manager said the worker was "not running". After (note built in `before_agent_start`): no stale claim |
+| V32 | Resume by asking the manager | `pi -p -c "My workers got interrupted. Please continue them…"` | ✅ `worker_resume` (not `worker_spawn`), then the result. First run exposed a race: `worker_resume` + `worker_wait` in one message, the wait saw the new worker `starting` and returned at once. After the fix: one wait, `status="done"` |
+| V33 | Dismiss | RPC: session with a busy record, `/workers-clear`, reopen | ✅ Toast on open; `stopped` record appended; no interrupted worker on reopen |
+| V34 | Regression | T1, T10, T11 | ✅ 6 commands incl. `workers-resume`; 18/18; 24/24 |
 | V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
@@ -69,6 +77,9 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14, V16, V17.)
 - `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`. (`PI_MULTI_AGENT_MAX_WORKERS` raised to 12: verified in V25.)
 - The widget reordering while workers finish, seen live (V24 checks the order logic only).
+- Resume after a hard kill of the manager (SIGKILL), where workers may still be finishing (the old-process check is
+  unit-tested only), and a resume of more than one worker at once.
+- Resume after `/reload` and `/resume` inside a running pi (same code path as startup, not run live).
 - A rendered `worker_wait` tool row seen live (same renderer as the verified `worker_status` row and `⚑` message;
   its parse/render is covered by V26).
 - Retry and compaction events inside long-running workers.
@@ -78,7 +89,9 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 
 ## Known issues & limitations
 
-1. **No reattach.** Workers end with the manager session (quit, `/new`, `/resume`, `/fork`, `/reload`).
+1. **No live reattach.** Worker processes end with the manager session (quit, `/new`, `/resume`, `/fork`,
+   `/reload`). Since v0.7.0, workers that were busy can be resumed in their own sessions; a resumed worker redoes
+   the step it was in.
 2. **No file locking** between workers. Parallel edits to the same file can conflict.
 3. **Thinking visibility depends on the provider.** Adaptive or summarized thinking may be absent on easy tasks.
 4. **Child usage is not in the manager's footer totals.** It is shown per worker instead.
@@ -86,7 +99,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 6. **`scripts/watch.sh`** expands its glob once, so workers spawned later need a re-run.
 7. **Possible duplicate result.** If the manager explicitly names an already auto-notified worker in `worker_wait`, the
    same result is returned again. (The default `worker_wait` target list excludes reported workers.)
-8. **Session list clutter.** Worker sessions (`worker:<name>`) are saved by default.
+8. **Old worker sessions in project lists.** Workers from before v0.7.0 saved their sessions in the project's list
+   (where `pi -c` could pick them). New ones use `~/.pi/agent/multi-agent/sessions/`, which pi-web does not list.
 9. **The `latest` symlink** is shared by all managers. The newest run wins.
 10. **Viewer height** is derived from `process.stdout.rows`, so very small terminals may clip.
 11. **Viewer history is capped** at 400 entries and 20,000 chars per entry. The `.log` file has everything.
@@ -94,6 +108,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 13. **The tools allowlist is not a sandbox.** Workers have your OS permissions.
 14. **Development artifacts** on this machine: 9 worker sessions and 3 run directories from testing. Clean them up
     with the [Runbook maintenance](RUNBOOK.md#maintenance) commands.
+15. **`/fork` copies worker records.** A forked manager session can offer the same interrupted worker as the
+    original; resume it from one of them only.
 
 ## Roadmap
 
@@ -112,7 +128,7 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - Full system prompt replacement, and per-worker extra CLI args.
 
 **P3: nice to have**
-- Reattach to workers after `/reload` (detached workers with a socket).
+- Live reattach: detached workers behind a socket that survive the manager (v0.7.0 resumes the work instead).
 - A split-view dashboard of all workers; overlay mode for the viewer.
 - HTML export of worker transcripts (RPC `export_html`) linked from results.
 - Report worker usage to the manager's totals (tool-result `usage`).
@@ -150,3 +166,10 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   tags, markdown table source, unrendered Markdown). Fix: new `report.ts` parses the unchanged LLM text and renders it
   (drawn tables, Markdown result, hidden tags, short log path). Added `scripts/test-render-report.ts` (T11) and
   `scripts/lib/pi-packages.ts`. Verified V26, V27.
+- v0.7.0. Resume after quit. Issue: quitting pi stopped all workers with no way back; `pi -c` reopened a worker's
+  session instead of the manager; resuming a worker's session by hand failed with a provider 400 when pi had quit
+  mid tool call. Fix: the manager records worker state in its session, restores busy workers as `↯ interrupted`, and
+  `/workers-resume` / `worker_resume` continue them in their own sessions after repairing unanswered tool calls; new
+  worker sessions go to `~/.pi/agent/multi-agent/sessions/`. Found and fixed during testing: a stale note to the
+  model (V31) and a wait race with parallel tool calls (V32), which also affected `worker_spawn` + `worker_wait`.
+  Added `scripts/test-resume.ts` (T12). Verified V28–V34.
