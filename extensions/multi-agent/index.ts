@@ -212,7 +212,17 @@ export default function multiAgent(pi: ExtensionAPI) {
 	// ------------------------------------------------------------ worker lifecycle
 
 	function onSettled(w: Worker): void {
-		if (w.stopping || w.reported || !w.config.notify) return;
+		if (w.stopping) return;
+		// Tell the user at once, even while the manager is busy with another turn.
+		try {
+			if (uiCtx?.hasUI) {
+				const ok = w.status === "done";
+				uiCtx.ui.notify(`Worker ${w.name} ${STATUS_LABEL[w.status]}`, ok ? "info" : "warning");
+			}
+		} catch {
+			/* stale context */
+		}
+		if (w.reported || !w.config.notify) return;
 		if ((waiting.get(w.name) ?? 0) > 0) return; // a worker_wait call will report it
 		w.reported = true;
 		const status = STATUS_LABEL[w.status];
@@ -306,12 +316,19 @@ export default function multiAgent(pi: ExtensionAPI) {
 		return worker;
 	}
 
+	type WaitOutcome = "done" | "timeout" | "aborted" | "interrupted";
+
+	/**
+	 * Blocks the manager's turn. Returns early when the user queues a message,
+	 * so the user can always talk to the manager while workers run.
+	 */
 	async function waitForWorkers(
 		workers: Worker[],
 		timeoutMs: number,
 		signal: AbortSignal | undefined,
+		ctx: ExtensionContext,
 		onProgress?: (text: string) => void,
-	): Promise<"done" | "timeout" | "aborted"> {
+	): Promise<WaitOutcome> {
 		for (const w of workers) waiting.set(w.name, (waiting.get(w.name) ?? 0) + 1);
 		try {
 			const deadline = Date.now() + timeoutMs;
@@ -319,6 +336,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			while (true) {
 				if (workers.every((w) => !w.busy)) return "done";
 				if (signal?.aborted) return "aborted";
+				if (userMessagePending(ctx)) return "interrupted";
 				if (Date.now() >= deadline) return "timeout";
 				if (onProgress && Date.now() - lastProgress >= 1000) {
 					lastProgress = Date.now();
@@ -336,13 +354,28 @@ export default function multiAgent(pi: ExtensionAPI) {
 		}
 	}
 
-	function buildResults(workers: Worker[], outcome: "done" | "timeout" | "aborted") {
+	function userMessagePending(ctx: ExtensionContext): boolean {
+		try {
+			return ctx.hasPendingMessages();
+		} catch {
+			return false;
+		}
+	}
+
+	function buildResults(workers: Worker[], outcome: WaitOutcome) {
 		const finished = workers.filter((w) => !w.busy);
 		const running = workers.filter((w) => w.busy);
 		const budget = Math.max(2_000, Math.floor(RESULT_BUDGET_BYTES / Math.max(1, finished.length)));
 		const parts: string[] = [];
 		if (outcome === "timeout") parts.push(`Wait timed out; ${running.length} worker(s) still running.`);
 		if (outcome === "aborted") parts.push("Wait cancelled; the workers keep running in the background.");
+		if (outcome === "interrupted") {
+			parts.push(
+				"Wait stopped because the user sent a message. The workers keep running in the background. " +
+					"Answer the user now; use worker_send if the message is for a worker. " +
+					"Do not call worker_wait again unless the user asks; results arrive automatically.",
+			);
+		}
 		for (const w of finished) {
 			w.reported = true;
 			parts.push(formatResult(w, budget));
@@ -408,13 +441,14 @@ export default function multiAgent(pi: ExtensionAPI) {
 		label: "Spawn Worker",
 		description:
 			"Start a worker: a separate pi agent process with its own context window, and give it a task. " +
-			"Returns immediately (unless wait=true) while the worker runs in parallel. Collect results with worker_wait; " +
-			"if nobody is waiting when a worker finishes, its result is sent to you automatically. " +
+			"Returns immediately (unless wait=true) while the worker runs in parallel. " +
+			"When the worker finishes, its result is sent to you automatically as a new message. " +
 			"The worker cannot see this conversation, so the task must be self-contained.",
 		promptSnippet: "Delegate a self-contained task to a parallel worker pi agent",
 		promptGuidelines: [
 			"Use worker_spawn to delegate independent subtasks (research, review, implementation of separate areas) to parallel worker agents; give each worker complete context, file paths, constraints and the expected output format, because workers cannot see this conversation.",
-			"After starting workers with worker_spawn, call worker_wait to collect their results instead of polling worker_status in a loop.",
+			"After starting workers with worker_spawn, end your turn: tell the user which workers run and that you will report each result. Results arrive automatically, and the user can talk to you meanwhile. Call worker_wait only when the user asks you to wait. Never poll worker_status in a loop.",
+			"When a worker result message arrives, report it to the user in a short summary.",
 			"Do not let two workers started with worker_spawn edit the same files at the same time; split work by file or module.",
 		],
 		parameters: Type.Object({
@@ -455,10 +489,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 			const worker = await spawnWorker(ctx, params);
 			await worker.prompt(params.task);
 			if (!params.wait) {
-				const notifyText =
-					worker.config.notify
-						? "Call worker_wait to collect the result, or continue other work; the result is sent to you automatically when it finishes."
-						: "Call worker_wait to collect the result.";
+				const notifyText = worker.config.notify
+					? "Do not wait. The result is sent to you automatically when it finishes. End your turn or continue other work."
+					: "notify=false: call worker_wait or worker_status to get the result.";
 				return {
 					content: [
 						{
@@ -472,7 +505,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 				};
 			}
 			const timeoutMs = (params.timeoutSeconds ?? DEFAULT_WAIT_SECONDS) * 1000;
-			const outcome = await waitForWorkers([worker], timeoutMs, signal, progressUpdater(onUpdate, [worker]));
+			const outcome = await waitForWorkers([worker], timeoutMs, signal, ctx, progressUpdater(onUpdate, [worker]));
 			return buildResults([worker], outcome);
 		},
 	});
@@ -506,7 +539,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			const disposition = await worker.send(params.message, mode);
 			if (params.wait) {
 				const timeoutMs = (params.timeoutSeconds ?? DEFAULT_WAIT_SECONDS) * 1000;
-				const outcome = await waitForWorkers([worker], timeoutMs, signal, progressUpdater(onUpdate, [worker]));
+				const outcome = await waitForWorkers([worker], timeoutMs, signal, ctx, progressUpdater(onUpdate, [worker]));
 				return buildResults([worker], outcome);
 			}
 			const what =
@@ -523,7 +556,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 		name: "worker_wait",
 		label: "Wait for Workers",
 		description:
-			"Wait until workers finish and return their final results. Without names, waits for every running worker and also returns results not yet reported to you.",
+			"Block until workers finish and return their final results. Use only when the user asks you to wait; otherwise results arrive automatically. " +
+			"Returns early if the user sends a message. Without names, waits for every running worker and also returns results not yet reported to you.",
 		promptSnippet: "Wait for workers to finish and collect their results",
 		parameters: Type.Object({
 			names: Type.Optional(Type.Array(Type.String(), { description: "Workers to wait for. Default: all running or unreported workers." })),
@@ -544,7 +578,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 				return { content: [{ type: "text", text }], details: { outcome: "done", workers: all.map(snapshot) } };
 			}
 			const timeoutMs = (params.timeoutSeconds ?? DEFAULT_WAIT_SECONDS) * 1000;
-			const outcome = await waitForWorkers(targets, timeoutMs, signal, progressUpdater(onUpdate, targets));
+			const outcome = await waitForWorkers(targets, timeoutMs, signal, ctx, progressUpdater(onUpdate, targets));
 			return buildResults(targets, outcome);
 		},
 	});

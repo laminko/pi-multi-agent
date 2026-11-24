@@ -11,8 +11,11 @@ Exact parameters are in the [Reference](reference.md). For watching workers, see
 - Workers are **long-lived**. After finishing a task, a worker stays alive with its context, so it can be given
   follow-up work. It stays until you kill it or the manager session ends.
 - Workers run **in parallel** with each other and with the manager.
-- Results flow back in one of two ways: the manager calls `worker_wait`, or, if nobody is waiting, the result is
-  **delivered automatically** as a message and the manager takes another turn to handle it.
+- **You can always talk to the manager.** After it spawns workers, it ends its turn. It does not block.
+- Results are **delivered automatically**. You get a toast (`Worker <name> done`), and the manager gets the
+  result as a message, takes a turn and reports it to you.
+- The manager calls `worker_wait` only when you ask it to wait. If you type while it waits, the wait stops within
+  1 s, and the manager reads your message. The workers keep running.
 
 ## Install and enable
 
@@ -40,7 +43,9 @@ You don't call the tools yourself; ask in plain language. The manager writes the
 
 > Spawn three workers in parallel: one reviews `src/auth/` for security issues (read-only), one finds every place
 > we parse dates and lists the formats used, one checks `docs/` for examples that no longer match the code.
-> Wait for all three, then give me a combined, prioritized list.
+> When all three are done, give me a combined, prioritized list.
+
+Say "wait for all three" only if you want the manager to block. You can still interrupt it by typing.
 
 **Pipeline.** Each stage feeds the next. The manager passes results along:
 
@@ -56,11 +61,17 @@ You don't call the tools yourself; ask in plain language. The manager writes the
 > Spawn a scout on a fast model with thinking off to list all call sites of `parseConfig`, then a worker on
 > the strongest model with thinking high to redesign it.
 
-**Fire and forget.** The manager keeps talking with you while workers run:
+**Fire and forget** (the default). The manager keeps talking with you while workers run:
 
-> Start a worker to run the full test suite and summarize failures. Don't wait. Meanwhile, let's discuss the API.
+> Start a worker to run the full test suite and summarize failures. Meanwhile, let's discuss the API.
 
-The result shows up as a `⚑ worker … done` message, and the manager reacts to it automatically.
+The result shows up as a toast and a `⚑ worker … done` message, and the manager reports it to you.
+
+**Redirect a running worker through the manager.** Just say it:
+
+> Tell the crawlers to be gentle: one request at a time, 5–15 s between pages.
+
+The manager calls `worker_send` with `mode: "steer"`. This works even if the manager was in `worker_wait`.
 
 ## Writing good worker tasks
 
