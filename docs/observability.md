@@ -28,13 +28,14 @@ thinking and recent activity) and the live progress table that `worker_wait` str
 Shown above the editor once the first worker starts. It is hidden while the `/workers` viewer is open.
 
 ```
-─ workers 1 running · 1 done  ·  /workers to watch live
- alpha ✓ done     4t 3⚒ ctx 7.7k $0.06 10s  → The `extensions/multi-agent` directory has four files: …
- beta  ● running  1t 0⚒ ctx 0 $0.00 8s  💭 …counting them to get 14. Then I want to cross-check that against…
+─ workers 0 running · 2 done  ·  /workers to watch live  ·  /workers-legend
+ St  Worker            Turns  Tools   Ctx  ↑In  ↓Out     Cost  Time  Now
+ ✓   alpha                 2      1  8.2k    4   140  $0.0018   19s  → Master — sleep finished. done …
+ ✓   beta-long-name-x      2      1  8.4k    4   312  $0.0019   20s  → Master — ran the requested command chain…
 ```
 
-Columns: name · status · turns (`t`) · tool calls (`⚒`) · current context size · cost · elapsed time of the current
-or last task · preview. The preview shows:
+The columns are the [status table](reference.md#status-table) columns. Type `/workers-legend` to see the legend
+in pi. The `Now` column is a live preview:
 
 - `💭 …` the tail of the current thinking, while the worker is thinking
 - `⟳ …` the current activity otherwise (`bash $ npm test`, `waiting for model`, `retry 1/3 …`, `compacting context`,

@@ -64,10 +64,70 @@ export function statusLine(w: Worker): string {
 	return line;
 }
 
+/**
+ * Legend for statusTable. Counters (turns, tools, in, out, cost) add up over the worker's whole life;
+ * time is the current task only.
+ */
+export const STATUS_LEGEND = [
+	"Legend:",
+	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped",
+	"  Turns   model calls (one per turn_start)",
+	"  Tools   tool calls; (n✗) = n returned an error",
+	"  Ctx     context size now = total tokens of the last model call",
+	"  ↑In     input tokens not served from cache",
+	"  ↓Out    output tokens, thinking included",
+	"  Cost    USD",
+	"  Time    time used by the current task",
+	"  Now     current activity while busy; error text when failed; widget: → result preview when done",
+	"  Turns, Tools, ↑In, ↓Out and Cost add up over the worker's whole life, not per task.",
+].join("\n");
+
+const TABLE_HEADERS = ["St", "Worker", "Turns", "Tools", "Ctx", "↑In", "↓Out", "Cost", "Time", "Now"] as const;
+const RIGHT_ALIGNED = new Set([2, 3, 4, 5, 6, 7, 8]);
+
+function nowText(w: Worker, max: number): string {
+	if (w.busy) return oneLine(w.activity, max);
+	if (w.status === "error" || w.status === "crashed") return oneLine(w.errorMessage ?? w.activity, max);
+	return "";
+}
+
+/** One row of cells for statusTable. */
+export function statusCells(w: Worker, nowMax = 60): string[] {
+	return [
+		STATUS_ICON[w.status],
+		w.queued ? `${w.name} (+${w.queued} queued)` : w.name,
+		String(w.turns),
+		w.toolErrors ? `${w.toolCalls} (${w.toolErrors}✗)` : String(w.toolCalls),
+		fmtTokens(w.usage.contextTokens),
+		fmtTokens(w.usage.input),
+		fmtTokens(w.usage.output),
+		fmtCost(w.usage.cost),
+		w.taskStartedAt ? fmtDuration(w.elapsedMs) : "-",
+		nowText(w, nowMax),
+	];
+}
+
+/**
+ * Default status format: an aligned table (valid markdown) plus the legend.
+ * Used by worker_status, worker_wait progress, and /workers without a TUI.
+ */
+export function statusTable(workers: Worker[], opts: { legend?: boolean } = {}): string {
+	if (workers.length === 0) return "No workers.";
+	const rows = workers.map((w) => statusCells(w));
+	const widths = TABLE_HEADERS.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+	const fmt = (cells: readonly string[]) =>
+		`| ${cells.map((c, i) => (RIGHT_ALIGNED.has(i) ? c.padStart(widths[i]!) : c.padEnd(widths[i]!))).join(" | ")} |`;
+	const rule = `|${widths.map((n, i) => (RIGHT_ALIGNED.has(i) ? `${"-".repeat(n + 1)}:` : "-".repeat(n + 2))).join("|")}|`;
+	const lines = [fmt(TABLE_HEADERS), rule, ...rows.map(fmt)];
+	if (opts.legend !== false) lines.push("", STATUS_LEGEND);
+	return lines.join("\n");
+}
+
 /** Detailed plain-text report for one worker (worker_status with a name). */
 export function detailReport(w: Worker, recentEntries = 15): string {
 	const lines = [
-		statusLine(w),
+		statusTable([w]),
+		"",
 		`model: ${w.model ?? "?"} · thinking: ${w.thinkingLevel ?? "?"} · tasks: ${w.tasks} · pid: ${w.pid ?? "?"}`,
 		`session: ${w.sessionFile ?? "(none)"}`,
 		`log: ${w.logPath}`,

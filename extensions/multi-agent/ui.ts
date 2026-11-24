@@ -3,7 +3,7 @@
  */
 
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { fmtCost, fmtDuration, fmtTokens, oneLine, STATUS_ICON, STATUS_LABEL, statsText } from "./format.ts";
+import { oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
 import type { TranscriptEntry, Worker, WorkerStatus } from "./worker.ts";
 
 // Loose structural types: keeps this file independent of exact pi type exports.
@@ -76,18 +76,29 @@ export function widgetLines(source: WorkerSource, width: number, theme: ThemeLik
 	const lines = [
 		theme.fg("dim", "─ ") +
 			theme.bold("workers") +
-			theme.fg("dim", ` ${summary.join(" · ")}  ·  /workers to watch live`),
+			theme.fg("dim", ` ${summary.join(" · ")}  ·  /workers to watch live  ·  /workers-legend`),
 	];
-	const nameWidth = Math.min(16, Math.max(...workers.map((w) => w.name.length)));
-	for (const w of workers.slice(0, MAX_WIDGET_ROWS)) {
-		const name = theme.bold(w.name.length > nameWidth ? `${w.name.slice(0, nameWidth - 1)}…` : w.name.padEnd(nameWidth));
-		const badge = statusBadge(w, theme);
-		const badgePad = " ".repeat(Math.max(0, 10 - visibleWidth(badge)));
-		const stats = theme.fg(
-			"dim",
-			`${w.turns}t ${w.toolCalls}⚒ ctx ${fmtTokens(w.usage.contextTokens)} ${fmtCost(w.usage.cost)} ${w.taskStartedAt ? fmtDuration(w.elapsedMs) : ""}`.trim(),
-		);
-		const head = ` ${name} ${badge}${badgePad} ${stats}  `;
+	// Same columns as the default status table (format.ts statusTable); the last column is the live preview.
+	const shown = workers.slice(0, MAX_WIDGET_ROWS);
+	const headers = ["St", "Worker", "Turns", "Tools", "Ctx", "↑In", "↓Out", "Cost", "Time"];
+	const rows = shown.map((w) => {
+		const c = statusCells(w).slice(0, headers.length);
+		if (c[1]!.length > 20) c[1] = `${c[1]!.slice(0, 19)}…`;
+		return c;
+	});
+	const widths = headers.map((h, i) => Math.max(visibleWidth(h), ...rows.map((r) => visibleWidth(r[i]!))));
+	const cell = (text: string, i: number) => {
+		const pad = " ".repeat(Math.max(0, widths[i]! - visibleWidth(text)));
+		return i >= 2 ? pad + text : text + pad;
+	};
+	lines.push(theme.fg("dim", ` ${headers.map(cell).join("  ")}  Now`));
+	for (let k = 0; k < shown.length; k++) {
+		const w = shown[k]!;
+		const r = rows[k]!;
+		const st = theme.fg(STATUS_COLOR[w.status], cell(r[0]!, 0));
+		const name = theme.bold(cell(r[1]!, 1));
+		const stats = theme.fg("dim", r.slice(2).map((t, j) => cell(t, j + 2)).join("  "));
+		const head = ` ${st}  ${name}  ${stats}  `;
 		const room = Math.max(10, width - visibleWidth(head));
 		lines.push(truncateToWidth(head + preview(w, theme, room), width));
 	}

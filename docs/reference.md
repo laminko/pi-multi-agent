@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.2.1: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.3.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -84,9 +84,9 @@ with `wait: true`.
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `name` | string | none | Without it: one status line per worker plus the run directory. With it: a detailed report. |
+| `name` | string | none | Without it: the [status table](#status-table) with its legend, plus the run directory. With it: a detailed report. |
 
-The detailed report contains: status line · model, thinking level, task count, pid · session file · log file ·
+The detailed report contains: status table and legend · model, thinking level, task count, pid · session file · log file ·
 latest thinking (if busy) · last 15 transcript entries (240 chars each) · last result (if not busy). It is truncated
 to 40 KB.
 
@@ -105,7 +105,9 @@ Stopping marks the worker as reported, so it does not auto-notify.
 
 ```
 <worker name="beta" status="done">
-✓ beta [done] 1 turns · 0 tools · ctx 4.1k · ↑2 ↓1.3k · $0.03 · 12s
+| St | Worker | Turns | Tools |  Ctx | ↑In | ↓Out |  Cost | Time | Now |
+|----|--------|------:|------:|-----:|----:|-----:|------:|-----:|-----|
+| ✓  | beta   |     1 |     0 | 4.1k |   2 | 1.3k | $0.03 |  12s |     |
 <result>
 …final assistant text of the task…
 </result>
@@ -114,22 +116,48 @@ Stopping marks the worker as reported, so it does not auto-notify.
 ```
 
 - `status` is a label from [Worker statuses](#worker-statuses). For `error` and `crashed`, an `error: …` line follows
-  the status line.
+  the table. Result blocks omit the legend, to save tokens.
 - The result is the text of the **last assistant message that contained text** during the task, or
   `(no final text output)` if there was none.
 - **Size budget:** 40 KB per tool result, split evenly across the reported workers (minimum 2 KB each). Truncated
   results end with `[result truncated …; full text: <run>/<name>.result.md]`.
 - Still-running workers (after a timeout or cancel) appear as `<worker name="…" status="running">` with their
-  status line.
+  status table row.
 
-Status line format: `<icon> <name> [<label>] <turns> turns · <tools> tools[ (<n> failed)] · ctx <context tokens> ·
-↑<input> ↓<output> · $<cost> · <elapsed>[ · <n> queued][ — <activity or error>]`.
+## Status table
+
+The default status format, since v0.3.0. `worker_status`, the `worker_wait` progress, `/workers` without a TUI and
+`/workers-legend` print it with its legend. The TUI widget uses the same columns.
+
+```
+| St | Worker   | Turns |   Tools | Ctx | ↑In | ↓Out |  Cost |   Time | Now               |
+|----|----------|------:|--------:|----:|----:|-----:|------:|-------:|-------------------|
+| ●  | worker-1 |    27 | 37 (2✗) | 99k |  56 |  22k | $1.55 | 15m27s | waiting for model |
+| ✓  | worker-2 |    27 | 33 (1✗) | 93k |  56 |  18k | $1.45 | 12m11s |                   |
+```
+
+| Column | Meaning | Source |
+|---|---|---|
+| St | `●` running · `✓` done (internal status `idle`) · `◌` starting · `■` aborted · `✗` error/crashed · `○` stopped | `STATUS_ICON` |
+| Worker | Name. `(+n queued)` = n steer or follow-up messages wait in the worker | `queue_update` |
+| Turns | Model calls, one per `turn_start` | `worker.ts`, `turns` |
+| Tools | Tool calls. `(n✗)` = n returned an error | `tool_execution_start` / `_end` |
+| Ctx | Context size now: the total tokens of the last model call | `usage.totalTokens` |
+| ↑In | Input tokens not served from cache, summed | `usage.input` |
+| ↓Out | Output tokens, thinking included, summed | `usage.output` |
+| Cost | USD, summed | `usage.cost.total` |
+| Time | Time used by the current task (or the last one, when done) | `taskStartedAt` |
+| Now | Current activity while busy; the error text on `error` or `crashed`. The widget shows `→ result` when done | `activity` |
+
+Turns, Tools, ↑In, ↓Out and Cost add up over the **whole life** of the worker. They are not reset per task. Time
+is per task.
 
 ## Slash commands
 
 | Command | Effect |
 |---|---|
-| `/workers [name]` | Opens the live viewer (TUI). Without a TUI, shows status lines as a notification. Tab-completes worker names. |
+| `/workers [name]` | Opens the live viewer (TUI). Without a TUI, shows the status table as a notification. Tab-completes worker names. |
+| `/workers-legend` | Shows the [status table](#status-table) and the legend of each column. |
 | `/worker-send <name> <message>` | Sends a message as you. Steers the worker if busy, otherwise starts a new task. When it finishes, the manager is auto-notified. |
 | `/worker-stop <name\|all> [kill]` | Aborts the current task, or with `kill` terminates the worker. |
 | `/workers-clear` | Removes **stopped and crashed** workers from the list and widget. Live workers, including idle ones, stay. Log files are kept. |

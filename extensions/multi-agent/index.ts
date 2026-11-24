@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { detailReport, oneLine, STATUS_LABEL, statusLine } from "./format.ts";
+import { detailReport, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
 import { createViewer, createWidgetComponent, type ViewerAction, widgetLines } from "./ui.ts";
 import { type DialogRequest, Worker, type WorkerHost } from "./worker.ts";
 
@@ -75,7 +75,7 @@ function snapshot(w: Worker) {
 
 /** Result block for the manager LLM. */
 function formatResult(w: Worker, maxBytes: number): string {
-	const lines = [`<worker name="${w.name}" status="${STATUS_LABEL[w.status]}">`, statusLine(w)];
+	const lines = [`<worker name="${w.name}" status="${STATUS_LABEL[w.status]}">`, statusTable([w], { legend: false })];
 	if ((w.status === "error" || w.status === "crashed") && w.errorMessage) lines.push(`error: ${w.errorMessage}`);
 	const result = w.result ?? "(no final text output)";
 	const t = truncateHead(result, { maxBytes, maxLines: 2000 });
@@ -341,7 +341,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 				if (onProgress && Date.now() - lastProgress >= 1000) {
 					lastProgress = Date.now();
 					const running = workers.filter((w) => w.busy).length;
-					onProgress(`Waiting for ${running}/${workers.length} worker(s)…\n${workers.map(statusLine).join("\n")}`);
+					onProgress(`Waiting for ${running}/${workers.length} worker(s)…\n${statusTable(workers)}`);
 				}
 				await abortableSleep(400, signal);
 			}
@@ -381,7 +381,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			parts.push(formatResult(w, budget));
 		}
 		for (const w of running) {
-			parts.push(`<worker name="${w.name}" status="running">\n${statusLine(w)}\n</worker>`);
+			parts.push(`<worker name="${w.name}" status="running">\n${statusTable([w], { legend: false })}\n</worker>`);
 		}
 		return {
 			content: [{ type: "text" as const, text: parts.join("\n\n") || "No workers." }],
@@ -577,7 +577,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			if (targets.length === 0) {
 				const all = registry.list();
 				const text = all.length
-					? `No running workers and no unreported results.\n${all.map(statusLine).join("\n")}`
+					? `No running workers and no unreported results.\n${statusTable(all)}`
 					: "No workers.";
 				return { content: [{ type: "text", text }], details: { outcome: "done", workers: all.map(snapshot) } };
 			}
@@ -591,7 +591,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 		name: "worker_status",
 		label: "Worker Status",
 		description:
-			"Show worker status. Without a name: one line per worker. With a name: details, latest thinking, recent activity and the last result.",
+			"Show worker status. Without a name: a status table (one row per worker) and its legend. With a name: details, latest thinking, recent activity and the last result. " +
+			"When you show worker status to the user, show the table and the legend as they are.",
 		promptSnippet: "Inspect worker progress, recent activity and results",
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: "Worker name for a detailed report." })),
@@ -606,7 +607,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 				return { content: [{ type: "text", text: t.content }], details: { workers: [snapshot(worker)] } };
 			}
 			const all = registry.list();
-			const text = all.length ? `${all.map(statusLine).join("\n")}\nlogs: ${runDir ?? "(none yet)"}` : "No workers.";
+			const text = all.length ? `${statusTable(all)}\n\nlogs: ${runDir ?? "(none yet)"}` : "No workers.";
 			return { content: [{ type: "text", text }], details: { workers: all.map(snapshot) } };
 		},
 	});
@@ -664,7 +665,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 	async function openViewer(ctx: ExtensionContext, initial?: string): Promise<void> {
 		if (ctx.mode !== "tui") {
 			const all = registry.list();
-			ctx.ui.notify(all.length ? all.map(statusLine).join("\n") : "No workers.", "info");
+			ctx.ui.notify(statusTable(all), "info");
 			return;
 		}
 		let current = initial;
@@ -753,6 +754,15 @@ export default function multiAgent(pi: ExtensionAPI) {
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 			}
+		},
+	});
+
+	pi.registerCommand("workers-legend", {
+		description: "Show the worker status table and the meaning of each column",
+		handler: async (_args, ctx) => {
+			uiCtx = ctx;
+			const all = registry.list();
+			ctx.ui.notify(all.length ? statusTable(all) : `No workers.\n\n${STATUS_LEGEND}`, "info");
 		},
 	});
 
