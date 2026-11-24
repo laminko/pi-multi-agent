@@ -4,22 +4,33 @@ How v0.7.0 works inside, and why it is built this way. For behavior and defaults
 
 ## Overview
 
-```
-┌──────────────────────── manager pi (interactive, or RPC host such as pi-web) ─────────────────────────┐
-│ extensions/multi-agent/index.ts                                                                       │
-│   Registry (Map name → Worker, "change" events)                                                       │
-│   tools: worker_spawn/send/wait/status/stop     commands: /workers /worker-send /worker-stop …        │
-│   WorkerHost: forwards worker dialogs to ctx.ui  ·  onSettled → pi.sendMessage (auto-notify)          │
-│   UI: widget (ui.ts) · viewer (ui.ts) · 1 s ticker · throttled refresh                                │
-│                                                                                                       │
-│   Worker (worker.ts) ×N ── stdin: JSONL commands ──►  pi --mode rpc --name worker:<name> …            │
-│                         ◄─ stdout: responses + events + extension_ui_request                          │
-│                         ◄─ stderr: diagnostics                                                        │
-│        │ writes                                                                                       │
-│        ▼                                                                                              │
-│   runs/<run>/<name>.log · .events.jsonl · .result.md · .stderr.log · .role.md                         │
-└───────────────────────────────────────────────────────────────────────────────────────────────────────┘
-                    each worker pi also persists its own session file (worker:<name>)
+```mermaid
+flowchart LR
+    subgraph MGR["Manager pi · interactive, or an RPC host such as pi-web"]
+        direction TB
+        CORE["index.ts · ui.ts · report.ts<br/>tools, commands, widget,<br/>viewer, result rendering"]
+        WK["worker.ts × N<br/>RPC client · state · logs"]
+        RES["resume.ts<br/>records · session repair"]
+        CORE -- drives --> WK
+        CORE -- records --> RES
+    end
+    PI["pi --mode rpc<br/>one per worker"]
+    LOGS[("run logs<br/>{name}.log · .events.jsonl")]
+    WSESS[("worker session files")]
+    MSESS[("manager session<br/>worker records")]
+    WK -- "stdin: commands" --> PI
+    PI -- "stdout: events, responses" --> WK
+    WK -- writes --> LOGS
+    PI -- persists --> WSESS
+    RES -- appends --> MSESS
+
+    classDef manager fill:#ECFEFF,stroke:#0891B2,color:#0F172A
+    classDef worker fill:#ECFDF5,stroke:#059669,color:#0F172A
+    classDef file fill:#FFFBEB,stroke:#D97706,color:#0F172A
+    class CORE,WK,RES manager
+    class PI worker
+    class LOGS,WSESS,MSESS file
+    style MGR fill:#0891B214,stroke:#0891B2,stroke-dasharray:6 4
 ```
 
 | File | Responsibility |
@@ -96,24 +107,37 @@ manager UI. `setStatus`, `setWidget`, `setTitle` and `set_editor_text` are ignor
 
 ## Worker state machine
 
-```
-                spawn                get_state ok
-   (new) ─────────────► starting ────────────────► idle ◄──────────────┐
-                           │                         │ prompt          │ agent_settled
-                           │ start fails / timeout   ▼                 │ (ok → idle,
-                           │                      running ─────────────┤  error → error,
-                           ▼                         │ steer/followUp  │  aborted → aborted)
-                 stopped (or crashed,                │ (stays running) │
-                 if it already exited)               │                 │
-                                                     │                 │
-   error / aborted ──── prompt ────────────────────► running           │
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "alive · a pi process is running" as Alive {
+        direction LR
+        [*] --> starting
+        starting --> ready: get_state ok
+        ready --> running: prompt
+        running --> ready: settled
+        ready: ready · done, error or aborted
+    }
+    [*] --> Alive: worker_spawn
+    [*] --> interrupted: reopened while busy
+    interrupted --> Alive: worker_resume
+    interrupted --> stopped: dismissed
+    Alive --> stopped: stop or kill
+    Alive --> crashed: unexpected exit
 
-   any state ── stop() ──────────► stopped     (intentional exit)
-   any state ── unexpected exit ─► crashed     (exit reason + stderr tail)
-
-   (session reopened, last record busy) ──► interrupted ── worker_resume ──► new Worker: starting → running
-                                                       ── kill / clear ───► stopped (dismissed)
+    classDef busy fill:#ECFEFF,stroke:#0891B2,color:#0F172A
+    classDef warn fill:#FFFBEB,stroke:#D97706,color:#0F172A
+    classDef bad fill:#FEF2F2,stroke:#DC2626,color:#0F172A
+    class running busy
+    class interrupted warn
+    class crashed bad
 ```
+
+`ready` is the status label `done`, `error` or `aborted`, depending on how the last task ended; in all three the
+worker is alive and the next prompt starts a new task. While `running`, steer and follow-up messages are queued into
+the current task. `stopped` is an intentional exit (including a failed start or a dismissed interrupted worker);
+`crashed` keeps the exit reason and the stderr tail. A resumed worker is a new process on the old session file, so it
+re-enters `alive` at `starting`.
 
 `busy` is the authoritative "working" flag. It is set **synchronously before** `prompt` is sent, so a
 `worker_wait` issued right after `worker_spawn` can never see a false "done". It is cleared by `agent_settled`, a
