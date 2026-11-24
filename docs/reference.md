@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.5.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.6.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -123,6 +123,20 @@ Stopping marks the worker as reported, so it does not auto-notify.
   results end with `[result truncated …; full text: <run>/<name>.result.md]`.
 - Still-running workers (after a timeout or cancel) appear as `<worker name="…" status="running">` with their
   status table row.
+
+**Display in the TUI** (since v0.6.0). The text above is what the manager LLM gets, unchanged. Tool rows and
+`⚑ worker …` messages show it rendered (`extensions/multi-agent/report.ts`):
+
+| Part | Shown as |
+|---|---|
+| `<worker>`, `<result>` tags | hidden |
+| status table | a drawn table |
+| result | Markdown; collapsed: first 6 lines and `… N more lines (ctrl+o to expand)` |
+| `error: …` | red; collapsed: first 14 lines |
+| `(full transcript log: …)` | `log: ~/…` (dim) |
+| text outside blocks (notes, legend, `logs:`) | as is, line breaks and alignment kept; collapsed: first 14 lines. Status tables inside it are drawn |
+
+A block that does not parse (for example cut off) is shown as plain text. Errors thrown by a tool stay plain red text.
 
 ## Status table
 

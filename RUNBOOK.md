@@ -32,6 +32,7 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Test: manager does not wait; result auto-reported | `node scripts/test-auto-report.ts` (T8) |
 | Test: interrupt in the interactive TUI | tmux recipe (T9) |
 | Test: widget and viewer with many workers (no model calls) | `node scripts/test-ui-overflow.ts` (T10) |
+| Test: result blocks parse and render (no model calls) | `node scripts/test-render-report.ts` (T11) |
 
 ## Prerequisites
 
@@ -214,6 +215,22 @@ counter always visible, markers only where tabs are hidden, marker clicks). The 
 
 To see it live (about $0.03 with haiku), start pi with `PI_MULTI_AGENT_MAX_WORKERS=12` and ask for 10 workers that
 each run `sleep 90`. The widget shows 8 rows and `… 2 more (2 running)`; `/workers` then shows `‹ N` / `N ›` markers.
+
+### T11. Result rendering
+
+Free, 1 s. No model calls.
+
+```bash
+node scripts/test-render-report.ts      # add -v to print the rendered views
+```
+
+**Expected:** 24 `PASS` lines and `all passed`. The parse checks feed the real producer (`formatResultBlock`) back
+into the parser: plain, truncated, crashed with a multi-line error, running, a result that contains `</result>` and
+`</worker>`, `worker_wait` and `worker_status` output, and a malformed block. The render checks confirm: no tags, a
+drawn table, Markdown in the result, the collapsed hint, the legend's alignment, and every line within the width.
+
+To see it live (under $0.01 with haiku): ask the manager to spawn one worker whose task is to reply with a Markdown
+report, and not to wait. The `⚑ worker … done` message shows a drawn table and the rendered report; `ctrl+o` expands it.
 
 ## Operating a session
 

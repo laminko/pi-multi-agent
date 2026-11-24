@@ -14,13 +14,14 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
-	formatSize,
 	getAgentDir,
+	getMarkdownTheme,
 	truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { detailReport, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
+import { formatResultBlock, formatRunningBlock, renderReport } from "./report.ts";
 import { createViewer, createWidgetComponent, type ViewerAction, widgetLines } from "./ui.ts";
 import { type DialogRequest, Worker, type WorkerHost } from "./worker.ts";
 
@@ -71,22 +72,6 @@ function snapshot(w: Worker) {
 		logPath: w.logPath,
 		sessionFile: w.sessionFile,
 	};
-}
-
-/** Result block for the manager LLM. */
-function formatResult(w: Worker, maxBytes: number): string {
-	const lines = [`<worker name="${w.name}" status="${STATUS_LABEL[w.status]}">`, statusTable([w], { legend: false })];
-	if ((w.status === "error" || w.status === "crashed") && w.errorMessage) lines.push(`error: ${w.errorMessage}`);
-	const result = w.result ?? "(no final text output)";
-	const t = truncateHead(result, { maxBytes, maxLines: 2000 });
-	lines.push("<result>", t.content, "</result>");
-	if (t.truncated) {
-		lines.push(
-			`[result truncated to ${formatSize(t.outputBytes)} of ${formatSize(t.totalBytes)}; full text: ${w.resultPath}]`,
-		);
-	}
-	lines.push(`(full transcript log: ${w.logPath})`, "</worker>");
-	return lines.join("\n");
 }
 
 function textOf(content: unknown): string {
@@ -233,7 +218,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			pi.sendMessage(
 				{
 					customType: MESSAGE_TYPE,
-					content: `Worker "${w.name}" finished (${status}).\n\n${formatResult(w, RESULT_BUDGET_BYTES)}`,
+					content: `Worker "${w.name}" finished (${status}).\n\n${formatResultBlock(w, RESULT_BUDGET_BYTES)}`,
 					display: true,
 					details: { name: w.name, status },
 				},
@@ -381,10 +366,10 @@ export default function multiAgent(pi: ExtensionAPI) {
 		}
 		for (const w of finished) {
 			w.reported = true;
-			parts.push(formatResult(w, budget));
+			parts.push(formatResultBlock(w, budget));
 		}
 		for (const w of running) {
-			parts.push(`<worker name="${w.name}" status="running">\n${statusTable([w], { legend: false })}\n</worker>`);
+			parts.push(formatRunningBlock(w));
 		}
 		return {
 			content: [{ type: "text" as const, text: parts.join("\n\n") || "No workers." }],
@@ -412,29 +397,41 @@ export default function multiAgent(pi: ExtensionAPI) {
 		};
 	}
 
+	/**
+	 * Tool rows: worker blocks, status tables and results are drawn as tables and Markdown (see report.ts). Errors keep
+	 * the plain red text.
+	 */
 	function renderResultText(result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) {
 		const text = textOf(result?.content);
+		const expandHint = context?.keyHint ? context.keyHint("app.tools.expand", "to expand") : "expand to see all";
+		if (!context?.isError) {
+			return renderReport(text, { expanded: options.expanded, theme, markdownTheme: getMarkdownTheme(), expandHint });
+		}
 		const lines = text.split("\n");
 		const limit = options.expanded ? lines.length : 12;
 		let out = lines.slice(0, limit).join("\n");
-		if (lines.length > limit) {
-			const hint = context?.keyHint ? context.keyHint("app.tools.expand", "to expand") : "expand to see all";
-			out += `\n${theme.fg("muted", `… ${lines.length - limit} more lines (${hint})`)}`;
-		}
-		return new Text(context?.isError ? theme.fg("error", out) : out, 0, 0);
+		if (lines.length > limit) out += `\n${theme.fg("muted", `… ${lines.length - limit} more lines (${expandHint})`)}`;
+		return new Text(theme.fg("error", out), 0, 0);
 	}
 
 	pi.registerMessageRenderer(MESSAGE_TYPE, (message, options, theme) => {
 		const details = message.details as { name?: string; status?: string } | undefined;
 		const ok = details?.status === "done";
 		const header = theme.fg(ok ? "success" : "warning", theme.bold(`⚑ worker ${details?.name ?? "?"} ${details?.status ?? ""}`));
-		const body = textOf(message.content).split("\n");
-		const limit = options.expanded ? body.length : 8;
-		let text = `${header}\n${theme.fg("dim", body.slice(0, limit).join("\n"))}`;
-		if (body.length > limit) {
-			text += `\n${theme.fg("muted", `… ${body.length - limit} more lines (${options.keyHint("app.tools.expand", "to expand")})`)}`;
-		}
-		return new Text(text, options.outputPad, 0);
+		// The first content line repeats the header ("Worker "x" finished (done)."); the rest is a worker block.
+		const body = textOf(message.content).replace(/^Worker "[^"\n]*" finished \([^)\n]*\)\.\n+/, "");
+		const view = new Container();
+		view.addChild(new Text(header, options.outputPad, 0));
+		view.addChild(
+			renderReport(body, {
+				expanded: options.expanded,
+				theme,
+				markdownTheme: getMarkdownTheme(),
+				expandHint: options.keyHint("app.tools.expand", "to expand"),
+				paddingX: options.outputPad,
+			}),
+		);
+		return view;
 	});
 
 	// ------------------------------------------------------------ tools for the manager LLM

@@ -101,6 +101,32 @@ tab would leave it:
 Open it on a specific worker with `/workers <name>` (Tab completes names). All keys are listed in the
 [Reference](reference.md#viewer-keys).
 
+## Results in the manager
+
+A finished worker's result reaches the manager as a `⚑ worker <name> <status>` message (auto-report), or in the
+`worker_wait` tool row. Both are rendered: the status table is drawn, the result is shown as Markdown, and the
+`<worker>`/`<result>` tags the LLM sees are hidden. `ctrl+o` expands the result.
+
+```
+⚑ worker be-lesson done
+┌────┬───────────┬───────┬───────┬──────┬─────┬──────┬─────────┬──────┬─────┐
+│ St │ Worker    │ Turns │ Tools │ Ctx  │ ↑In │ ↓Out │ Cost    │ Time │ Now │
+├────┼───────────┼───────┼───────┼──────┼─────┼──────┼─────────┼──────┼─────┤
+│ ✓  │ be-lesson │ 1     │ 0     │ 2.7k │ 2   │ 121  │ $0.0006 │ 2s   │     │
+└────┴───────────┴───────┴───────┴──────┴─────┴──────┴─────────┴──────┴─────┘
+
+ Summary
+
+ - Scope: Report generated without any tool calls, as requested.
+ - Format: Uses a heading, a bullet list, and a table.
+ - Status: Complete.
+ … 7 more lines (ctrl+o to expand)
+ log: ~/.pi/agent/multi-agent/runs/2026-11-24-14-30-57-01a20df7/be-lesson.log
+```
+
+`worker_status`, the `worker_wait` progress table and other worker tool rows draw their status tables the same way,
+and keep the legend's alignment. The exact rules are in the [Reference](reference.md#result-format).
+
 ## Log files
 
 Each manager session that spawns workers gets a run directory. `latest` always points to the newest one:

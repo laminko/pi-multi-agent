@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.0 — 2026-11-24
+
+Worker results are rendered in the TUI instead of shown as raw text.
+
+### Changed
+
+- The `⚑ worker … done` message and the worker tool rows (`worker_wait`, `worker_status`, …) no longer show the
+  `<worker …>` / `<result>` tags and the markdown table source. The status table is drawn as a table, the result is
+  rendered as Markdown (collapsed: first 6 lines, `ctrl+o` expands), errors are red, and the log path is shown as
+  `log: ~/…`. Text outside worker blocks, such as the legend, keeps its line breaks and alignment.
+- The text the manager LLM gets is unchanged.
+
+### Added
+
+- `extensions/multi-agent/report.ts`: the result-block producer (moved from `index.ts`), a parser, and the renderer.
+- `scripts/test-render-report.ts` (Runbook T11): 24 parse and render checks, no model calls.
+- `scripts/lib/pi-packages.ts`: shared resolve hook so the test scripts can import pi's packages under plain Node.
+
+### Fixed (during development)
+
+- A result containing a `</result>` line followed by `</worker>` would have ended the block early. The end marker
+  now requires the log note that every block has.
+
+### Tested
+
+- T11: 24 of 24 PASS. T10 and T1 still pass.
+- Live in tmux (haiku): the auto-report of a worker's Markdown report showed a drawn table, the rendered heading and
+  bold text, the collapsed hint and `log: ~/…`; `ctrl+o` expanded it, and the worker's own table was drawn too. The
+  `worker_status` row showed a drawn table and the aligned legend.
+
 ## 0.5.0 — 2026-11-24
 
 Many workers: nothing important is hidden. There is still no scrollbar.

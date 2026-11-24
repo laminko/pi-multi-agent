@@ -4,45 +4,13 @@
  *
  *   node scripts/test-ui-overflow.ts [-v]      # -v prints the rendered lines
  *
- * Needs Node with TypeScript type stripping and module.registerHooks (>= 22.18). pi's own packages are found through
- * the `pi` on PATH, or set PI_NODE_MODULES to the node_modules directory that contains @earendil-works/pi-tui.
+ * Needs Node >= 22.18. pi's own packages are found through the `pi` on PATH (see scripts/lib/pi-packages.ts).
  */
-import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import * as fs from "node:fs";
-import { registerHooks } from "node:module";
-import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { extensionModule } from "./lib/pi-packages.ts";
 
-// ------------------------------------------------------------ resolve pi's packages (pi maps them for extensions)
-
-function findPiNodeModules(): string {
-	if (process.env.PI_NODE_MODULES) return process.env.PI_NODE_MODULES;
-	const piBin = execFileSync("sh", ["-c", "command -v pi"]).toString().trim();
-	let start = fs.realpathSync(piBin);
-	if (fs.readFileSync(piBin, "utf8").startsWith("#!/bin/sh")) {
-		// Managed install: the launcher execs install/releases/<version>/node_modules/.bin/pi.
-		const agentDir = path.dirname(path.dirname(start));
-		const version = fs.readFileSync(path.join(agentDir, "install", "current-version"), "utf8").trim();
-		start = fs.realpathSync(path.join(agentDir, "install", "releases", version, "node_modules", ".bin", "pi"));
-	}
-	for (let dir = path.dirname(start); dir !== path.dirname(dir); dir = path.dirname(dir)) {
-		if (fs.existsSync(path.join(dir, "node_modules", "@earendil-works", "pi-tui"))) return path.join(dir, "node_modules");
-	}
-	throw new Error("Cannot find @earendil-works/pi-tui next to pi; set PI_NODE_MODULES");
-}
-
-const piParent = pathToFileURL(`${findPiNodeModules()}/`).href;
-registerHooks({
-	resolve(specifier, context, nextResolve) {
-		if (specifier.startsWith("@earendil-works/")) return nextResolve(specifier, { ...context, parentURL: piParent });
-		return nextResolve(specifier, context);
-	},
-});
-
-const extDir = path.resolve(import.meta.dirname, "..", "extensions", "multi-agent");
-const { Worker } = await import(pathToFileURL(path.join(extDir, "worker.ts")).href);
-const ui = await import(pathToFileURL(path.join(extDir, "ui.ts")).href);
+const { Worker } = await import(extensionModule("worker.ts"));
+const ui = await import(extensionModule("ui.ts"));
 const { visibleWidth } = await import("@earendil-works/pi-tui");
 
 // ------------------------------------------------------------ fakes
@@ -143,7 +111,7 @@ const twelve: Kind[] = ["done", "done", "done", ...Array(7).fill("running"), "cr
 // PI_MULTI_AGENT_WIDGET_ROWS (read at load; a query string gives a fresh module instance).
 {
 	process.env.PI_MULTI_AGENT_WIDGET_ROWS = "3";
-	const ui3 = await import(`${pathToFileURL(path.join(extDir, "ui.ts")).href}?rows=3`);
+	const ui3 = await import(`${extensionModule("ui.ts")}?rows=3`);
 	delete process.env.PI_MULTI_AGENT_WIDGET_ROWS;
 	const lines = ui3.widgetLines(fakeSource(twelve), 120);
 	show("widget, 12 workers, PI_MULTI_AGENT_WIDGET_ROWS=3", lines);

@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.5.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.6.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
@@ -27,7 +27,8 @@ How v0.5.0 works inside, and why it is built this way. For behavior and defaults
 | `index.ts` | Extension entry: registry, tools, commands, message renderer, dialog forwarding, auto-notify, wait loop, widget plumbing, session lifecycle |
 | `worker.ts` | One worker process: spawn, strict JSONL RPC client, event → state mapping, transcript, log files, shutdown escalation |
 | `ui.ts` | Widget component / plain lines, and the `/workers` viewer component |
-| `format.ts` | Shared text formatting (status lines, reports, numbers) |
+| `format.ts` | Shared text formatting (status table, legend, reports, numbers) |
+| `report.ts` | Worker result blocks: the LLM text (`formatResultBlock`, `formatRunningBlock`), its parser, and the TUI renderer for tool rows and auto-report messages |
 
 ## Process model
 
@@ -155,9 +156,13 @@ manager UI. `setStatus`, `setWidget`, `setTitle` and `set_editor_text` are ignor
   The tab bar is a window `[tabStart, tabEnd]` over the workers in spawn order: `tabStart` persists across renders
   and moves only when the current tab would fall outside the window, and the window grows left when there is free
   room. The `worker i/N` counter's width is reserved, so it is never cut off.
-- **Tool rows.** Custom `renderCall` shows the worker name and task. `renderResult` shows the first 12 lines
-  collapsed, and everything when expanded. Auto-notifications have a message renderer (`⚑ worker <name> <status>`, 8
-  lines collapsed).
+- **Tool rows and auto-reports.** Custom `renderCall` shows the worker name and task. `renderResult` and the
+  auto-report message renderer (`⚑ worker <name> <status>`) both call `renderReport()` (`report.ts`). It parses the
+  LLM text back into `<worker>` blocks, markdown tables and plain text, and builds a `Container`: tables and results
+  as pi-tui `Markdown`, other text as `Text` (line breaks kept), each part clamped when collapsed. The LLM text is
+  never changed for display, and the producer and the parser live in the same file, so they change together. A
+  result ends at the `</result>` that is followed by the log note and `</worker>`, so results that contain the tags
+  themselves still parse. Anything that does not parse is shown as plain text.
 
 ## Files and logging
 
@@ -213,4 +218,5 @@ If a pi upgrade changes any of these, re-run the smoke tests in the [Runbook](..
 - Extension API: `registerTool` (`renderCall`/`renderResult`, `promptSnippet`/`promptGuidelines`), `registerCommand`,
   `registerMessageRenderer`, `sendMessage` (`deliverAs`, `triggerTurn`), `ctx.ui.setWidget` (factory and string
   forms), `ctx.ui.custom`, dialogs, `session_start`/`session_shutdown`, `getAgentDir`, `truncateHead`
-- pi-tui: `truncateToWidth`, `visibleWidth`, `wrapTextWithAnsi`, `matchesKey`, `Text`
+- pi-tui: `truncateToWidth`, `visibleWidth`, `wrapTextWithAnsi`, `matchesKey`, `Text`, `Markdown` (including
+  tables), `Container`, `Spacer`; pi-coding-agent: `getMarkdownTheme`
