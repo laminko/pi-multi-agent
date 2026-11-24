@@ -77,11 +77,15 @@ extensions/multi-agent/
   worker.ts      one worker: spawns `pi --mode rpc`, JSONL client, state, logs, shutdown
   ui.ts          widget + /workers viewer
   format.ts      shared formatting
+  report.ts      worker result blocks: LLM text, parser, TUI rendering
 scripts/
   watch.sh          tail worker logs from another terminal
   smoke-worker.ts   smoke test for the worker RPC layer (node scripts/smoke-worker.ts)
   test-wait-interrupt.ts  end-to-end: typing interrupts worker_wait (RUNBOOK T7)
   test-auto-report.ts     end-to-end: no wait after spawn, result auto-reported (RUNBOOK T8)
+  test-ui-overflow.ts     widget and viewer with many workers, no model calls (RUNBOOK T10)
+  test-render-report.ts   result blocks: parse and render, no model calls (RUNBOOK T11)
+  lib/pi-packages.ts      lets the test scripts import pi's packages under plain Node
 docs/            user guide, observability, reference, architecture
 RUNBOOK.md  STATUS.md  CHANGELOG.md  INDEX.md  package.json (pi package manifest)
 ```

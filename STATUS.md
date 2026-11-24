@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.5.0 |
+| **Version** | 0.6.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -17,6 +17,7 @@
 | Non-blocking manager | ✅ Done · verified | The manager does not wait after a spawn (V15). Typing ends a `worker_wait` in < 1 s (V14) |
 | Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20). Running workers first; `… N more (…)` past 8 rows (V24, V25) |
 | Mouse (fullscreen) | ✅ Done · verified | Widget row click, viewer tab click, wheel, help-line actions (V22, V23) |
+| Result rendering (TUI) | ✅ Done · verified | Worker blocks in tool rows and `⚑` messages: drawn table, Markdown result, no tags (V26, V27) |
 | Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message, tab window for many workers (V24, V25). The `a`/`k` keys were not exercised |
 | Slash commands | ⚠️ Partly verified | `/workers` verified; `/worker-send`, `/worker-stop` and `/workers-clear` not exercised |
@@ -56,6 +57,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V23 | Mouse in fullscreen TUI | tmux 150×45, SGR press/release sequences | ✅ 3 of 3: row → viewer on `worker-2`; tab → `worker-1`; `esc close` → closed |
 | V21 | Regression after 0.3.0 | T1, T7, T7 follow-up, T8 | ✅ T1 5 commands incl. `workers-legend`; T7 210 ms; follow-up 213 ms; T8 0 waits, 1 toast |
 | V24 | Many workers, rendering logic | `scripts/test-ui-overflow.ts` (T10): fake workers, pi-tui width functions | ✅ 18 of 18: row order, `… 4 more (3 done, 1 stopped)`, `PI_MULTI_AGENT_WIDGET_ROWS=3`, 4 widget clicks, tab window at widths 120/80/60 and long names, 2 marker clicks |
+| V26 | Result rendering, logic | `scripts/test-render-report.ts` (T11): real producer → parser → renderer | ✅ 24 of 24. First run found a parser bug: a result containing `</result>` then `</worker>` ended early. Fixed by requiring the log note in the end marker |
+| V27 | Result rendering, live TUI | tmux 150×60, haiku, 1 worker with a Markdown report, auto-report; then `worker_status` | ✅ `⚑` message: drawn table, heading and bold rendered, `… 7 more lines (ctrl+o to expand)`, `log: ~/…`; `ctrl+o` showed the worker's own table drawn; `worker_status` row: drawn table + aligned legend; T1, T10 pass; 0 orphans |
 | V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
@@ -66,6 +69,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14, V16, V17.)
 - `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`. (`PI_MULTI_AGENT_MAX_WORKERS` raised to 12: verified in V25.)
 - The widget reordering while workers finish, seen live (V24 checks the order logic only).
+- A rendered `worker_wait` tool row seen live (same renderer as the verified `worker_status` row and `⚑` message;
+  its parse/render is covered by V26).
 - Retry and compaction events inside long-running workers.
 - A manager hosted by pi-web; Linux; Windows.
 - Two managers running at once (they share the `latest` symlink).
@@ -141,3 +146,7 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   could hide the current tab and the `worker i/N` counter. Fix: running workers sort first, the more-line names the
   hidden statuses and is clickable, `PI_MULTI_AGENT_WIDGET_ROWS`; the tab bar shows a window with `‹ N` / `N ›`
   markers. Added `scripts/test-ui-overflow.ts` (T10). Verified V24, V25.
+- v0.6.0. Result rendering. Issue: worker results showed as raw LLM text in the TUI (`<worker …>` and `<result>`
+  tags, markdown table source, unrendered Markdown). Fix: new `report.ts` parses the unchanged LLM text and renders it
+  (drawn tables, Markdown result, hidden tags, short log path). Added `scripts/test-render-report.ts` (T11) and
+  `scripts/lib/pi-packages.ts`. Verified V26, V27.
