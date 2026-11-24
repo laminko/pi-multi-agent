@@ -20,20 +20,23 @@ Exact parameters are in the [Reference](reference.md). For watching workers, see
 ## Install and enable
 
 ```bash
-# one session only
-pi -e /path/to/pi-multi-agent/extensions/multi-agent/index.ts
+# one session only (nothing is written to settings)
+pi -e git:github.com/laminko/pi-multi-agent
 
 # always (writes ~/.pi/agent/settings.json)
-pi install /path/to/pi-multi-agent
+pi install git:github.com/laminko/pi-multi-agent
 
 # only in the current project (writes .pi/settings.json; requires project trust)
-pi install -l /path/to/pi-multi-agent
+pi install -l git:github.com/laminko/pi-multi-agent
 
-# remove again
-pi remove /path/to/pi-multi-agent
+# update, or remove again
+pi update git:github.com/laminko/pi-multi-agent
+pi remove git:github.com/laminko/pi-multi-agent
 ```
 
-After `pi install`, a running pi picks the extension up on `/reload`. Note that reloading stops any running workers.
+After `pi install`, a running pi picks the extension up on `/reload`. Note that reloading stops any running workers
+(busy ones can be resumed). Load only one copy: an installed package plus `pi -e` with a clone makes the tools
+conflict. Installing from a clone is in the [Runbook](../RUNBOOK.md#install-upgrade-uninstall).
 
 ## Asking the manager to use workers
 
