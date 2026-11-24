@@ -21,6 +21,16 @@ import {
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { detailReport, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
+import {
+	assessHealth,
+	describeHealthConfig,
+	healthAlertText,
+	healthFollowUp,
+	healthTitle,
+	heartbeat,
+	readHealthConfig,
+	updateHealth,
+} from "./health.ts";
 import { formatResultBlock, formatRunningBlock, renderReport } from "./report.ts";
 import {
 	INTERRUPTED_NOTE,
@@ -39,6 +49,8 @@ const WIDGET_KEY = "multi-agent";
 const MESSAGE_TYPE = "multi-agent";
 /** Hidden note to the manager LLM about interrupted workers (delivered with the next user prompt). */
 const NOTE_TYPE = "multi-agent-note";
+/** Health check alert: a worker may be stuck (see health.ts). */
+const HEALTH_TYPE = "multi-agent-health";
 const MAX_LIVE_WORKERS = Number(process.env.PI_MULTI_AGENT_MAX_WORKERS) || 8;
 const RESULT_BUDGET_BYTES = 40_000; // per tool result, shared by the workers it reports on
 const DEFAULT_WAIT_SECONDS = 1800;
@@ -131,6 +143,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 	let viewerOpen = false;
 	let renderTimer: ReturnType<typeof setTimeout> | undefined;
 	let ticker: ReturnType<typeof setInterval> | undefined;
+	/** Health checks (health.ts): PI_MULTI_AGENT_HEALTH_INTERVAL (default 10 s), PI_MULTI_AGENT_STALL_SECONDS (180 s). */
+	const healthConfig = readHealthConfig();
+	let healthTimer: ReturnType<typeof setInterval> | undefined;
 
 	// ------------------------------------------------------------ UI plumbing
 
@@ -256,6 +271,59 @@ export default function multiAgent(pi: ExtensionAPI) {
 					content: `Worker "${w.name}" finished (${status}).\n\n${formatResultBlock(w, RESULT_BUDGET_BYTES)}`,
 					display: true,
 					details: { name: w.name, status },
+				},
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
+		} catch {
+			/* session gone */
+		}
+	}
+
+	// ------------------------------------------------------------ health checks (see health.ts)
+
+	function toast(message: string, level: "info" | "warning"): void {
+		try {
+			if (uiCtx?.hasUI) uiCtx.ui.notify(message, level);
+		} catch {
+			/* stale context */
+		}
+	}
+
+	/**
+	 * Follow up on every busy worker: heartbeat, verdict, and an alert when it may be stuck. Runs every
+	 * healthConfig.intervalMs; costs no model tokens unless an alert goes to the manager LLM.
+	 */
+	async function checkHealth(): Promise<void> {
+		if (shuttingDown) return;
+		const targets = registry.list().filter((w) => w.busy && w.alive && !w.stopping);
+		await Promise.all(
+			targets.map(async (w) => {
+				await heartbeat(w, healthConfig);
+				// The worker may have settled, been stopped or replaced while the heartbeat was out.
+				if (shuttingDown || !w.busy || w.stopping || registry.workers.get(w.name) !== w) return;
+				const now = Date.now();
+				const action = updateHealth(w, assessHealth(w, now, healthConfig), now, healthConfig);
+				if (action.kind === "none") return;
+				registry.emit("change");
+				if (action.kind === "alert") alertManager(w, action.repeat);
+				else if (action.kind === "recovered" && action.alerted) toast(`Worker ${w.name} is making progress again`, "info");
+			}),
+		);
+	}
+
+	/** Tell you at once, and the manager LLM so it follows up (same delivery rules as a result). */
+	function alertManager(w: Worker, repeat: boolean): void {
+		const h = w.health;
+		toast(`Worker ${w.name} ${repeat ? "is still" : "may be"} stuck (${healthTitle(h.state)}): ${oneLine(h.detail, 200)}`, "warning");
+		if (!w.config.notify) return; // notify=false: worker_wait / worker_status show the health instead
+		if ((waiting.get(w.name) ?? 0) > 0) return; // the waiting worker_wait returns "stalled" with this alert
+		try {
+			pi.sendMessage(
+				{
+					customType: HEALTH_TYPE,
+					content: healthAlertText(w, healthConfig, repeat),
+					display: true,
+					details: { name: w.name, state: h.state, title: healthTitle(h.state), detail: h.detail, repeat },
 				},
 				{ deliverAs: "followUp", triggerTurn: true },
 			);
@@ -505,11 +573,12 @@ export default function multiAgent(pi: ExtensionAPI) {
 		return worker;
 	}
 
-	type WaitOutcome = "done" | "timeout" | "aborted" | "interrupted";
+	type WaitOutcome = "done" | "timeout" | "aborted" | "interrupted" | "stalled";
 
 	/**
-	 * Blocks the manager's turn. Returns early when the user queues a message,
-	 * so the user can always talk to the manager while workers run.
+	 * Blocks the manager's turn. Returns early when the user queues a message, so the user can always talk to the
+	 * manager while workers run, and when the health check alerts about a waited-for worker ("stalled"), so the manager
+	 * follows up instead of waiting for the timeout.
 	 */
 	async function waitForWorkers(
 		workers: Worker[],
@@ -519,6 +588,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 		onProgress?: (text: string) => void,
 	): Promise<WaitOutcome> {
 		for (const w of workers) waiting.set(w.name, (waiting.get(w.name) ?? 0) + 1);
+		// Alerts so far, per worker object (a resume replaces the object; the new one starts at 0).
+		const alertsBefore = new Map(workers.map((w) => [latest(w), latest(w).health.alerts]));
+		const newAlert = (w: Worker) => w.health.alerts > (alertsBefore.get(w) ?? 0);
 		try {
 			const deadline = Date.now() + timeoutMs;
 			let lastProgress = 0;
@@ -527,6 +599,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 				if (now.every((w) => !working(w))) return "done";
 				if (signal?.aborted) return "aborted";
 				if (userMessagePending(ctx)) return "interrupted";
+				if (now.some((w) => working(w) && newAlert(w))) return "stalled";
 				if (Date.now() >= deadline) return "timeout";
 				if (onProgress && Date.now() - lastProgress >= 1000) {
 					lastProgress = Date.now();
@@ -565,6 +638,15 @@ export default function multiAgent(pi: ExtensionAPI) {
 				"Wait stopped because the user sent a message. The workers keep running in the background. " +
 					"Answer the user now; use worker_send if the message is for a worker. " +
 					"Do not call worker_wait again unless the user asks; results arrive automatically.",
+			);
+		}
+		if (outcome === "stalled") {
+			const stuck = running.filter((w) => w.health.episodeAlerts > 0);
+			parts.push(
+				`Wait stopped early: the health check found ${stuck.length || "a"} worker(s) that may be stuck. ` +
+					"They keep running. Follow up now and tell the user what you found and did. Call worker_wait again only if " +
+					"you decide to keep waiting.",
+				...stuck.map(healthFollowUp),
 			);
 		}
 		for (const w of finished) {
@@ -637,6 +719,29 @@ export default function multiAgent(pi: ExtensionAPI) {
 		return view;
 	});
 
+	pi.registerMessageRenderer(HEALTH_TYPE, (message, options, theme) => {
+		const d = message.details as { name?: string; title?: string; detail?: string; repeat?: boolean } | undefined;
+		const header = theme.fg(
+			"warning",
+			theme.bold(`⚠ worker ${d?.name ?? "?"} ${d?.repeat ? "still stuck" : "may be stuck"} (${d?.title ?? "?"})`),
+		);
+		// The first content line is the headline; the header shows it, the detail follows in full.
+		const body = textOf(message.content).replace(/^[^\n]*\n+/, "");
+		const view = new Container();
+		view.addChild(new Text(header, options.outputPad, 0));
+		if (d?.detail) view.addChild(new Text(theme.fg("warning", d.detail), options.outputPad, 0));
+		view.addChild(
+			renderReport(body, {
+				expanded: options.expanded,
+				theme,
+				markdownTheme: getMarkdownTheme(),
+				expandHint: options.keyHint("app.tools.expand", "to expand"),
+				paddingX: options.outputPad,
+			}),
+		);
+		return view;
+	});
+
 	// ------------------------------------------------------------ tools for the manager LLM
 
 	pi.registerTool({
@@ -652,6 +757,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			"Use worker_spawn to delegate independent subtasks (research, review, implementation of separate areas) to parallel worker agents; give each worker complete context, file paths, constraints and the expected output format, because workers cannot see this conversation.",
 			"After starting workers with worker_spawn, end your turn: tell the user which workers run and that you will report each result. Results arrive automatically, and the user can talk to you meanwhile. Use worker_wait, or wait=true on worker_spawn/worker_send, only when the user asks you to wait. Never poll worker_status in a loop.",
 			"When a worker result message arrives, report it to the user in a short summary.",
+			"When a health alert says a worker may be stuck, follow up on it: check with worker_status, then leave it running, steer, abort or kill it, and tell the user briefly what you found and did.",
 			"Do not let two workers started with worker_spawn edit the same files at the same time; split work by file or module.",
 		],
 		parameters: Type.Object({
@@ -769,7 +875,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 		label: "Wait for Workers",
 		description:
 			"Block until workers finish and return their final results. Use only when the user asks you to wait; otherwise results arrive automatically. " +
-			"Returns early if the user sends a message. Without names, waits for every running worker and also returns results not yet reported to you.",
+			"Returns early if the user sends a message or a health check finds a waited-for worker stuck. Without names, waits for every running worker and also returns results not yet reported to you.",
 		promptSnippet: "Wait for workers to finish and collect their results",
 		parameters: Type.Object({
 			names: Type.Optional(Type.Array(Type.String(), { description: "Workers to wait for. Default: all running or unreported workers." })),
@@ -815,7 +921,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 				return { content: [{ type: "text", text: t.content }], details: { workers: [snapshot(worker)] } };
 			}
 			const all = registry.list();
-			const text = all.length ? `${statusTable(all)}\n\nlogs: ${runDir ?? "(none yet)"}` : "No workers.";
+			const text = all.length
+				? `${statusTable(all)}\n\nlogs: ${runDir ?? "(none yet)"}\n${describeHealthConfig(healthConfig)}`
+				: "No workers.";
 			return { content: [{ type: "text", text }], details: { workers: all.map(snapshot) } };
 		},
 	});
@@ -1063,6 +1171,11 @@ export default function multiAgent(pi: ExtensionAPI) {
 			}, 1000);
 			ticker.unref?.();
 		}
+		if (!healthTimer && healthConfig.intervalMs > 0) {
+			// Follow up on running workers (health.ts). With no busy worker a tick does nothing.
+			healthTimer = setInterval(() => void checkHealth().catch(() => undefined), healthConfig.intervalMs);
+			healthTimer.unref?.();
+		}
 		refreshWidget();
 	});
 
@@ -1072,6 +1185,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 		shuttingDown = true;
 		if (ticker) clearInterval(ticker);
 		ticker = undefined;
+		if (healthTimer) clearInterval(healthTimer);
+		healthTimer = undefined;
 		if (renderTimer) clearTimeout(renderTimer);
 		renderTimer = undefined;
 		const workers = registry.list();

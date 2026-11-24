@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | 0.7.0 |
+| **Version** | 0.8.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
-| **Last updated** | 2026-11-24 |
+| **Last updated** | 2026-11-25 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default`, `claude-code/claude-haiku-5-5`; real-project test: Python 3.15, SQLite 3.54 |
 
 ## Component status
@@ -18,6 +18,7 @@
 | Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20). Running workers first; `… N more (…)` past 8 rows (V24, V25) |
 | Mouse (fullscreen) | ✅ Done · verified | Widget row click, viewer tab click, wheel, help-line actions (V22, V23) |
 | Resume after quit | ✅ Done · verified | Records, `↯ interrupted` restore, `/workers-resume`, `worker_resume`, session repair, worker sessions in their own dir (V28–V34) |
+| Health checks (stuck workers) | ✅ Done · verified | Every 10 s while workers run: heartbeat + quiet / not answering / loop verdicts, toast, `⚠` warning, alert to the manager LLM, `worker_wait` ends `stalled` (V36–V39) |
 | Result rendering (TUI) | ✅ Done · verified | Worker blocks in tool rows and `⚑` messages: drawn table, Markdown result, no tags (V26, V27) |
 | Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message, tab window for many workers (V24, V25). The `a`/`k` keys were not exercised |
@@ -25,7 +26,7 @@
 | Logs, result files, event log | ✅ Done · verified | Event log compaction verified (40 KB → 14 KB) |
 | Dialog forwarding from workers | ⚠️ Implemented, untested | No extension raised a dialog during testing |
 | Documentation | ✅ Done | README, RUNBOOK, STATUS, docs/ |
-| Automated tests | ❌ Not started | See roadmap |
+| Automated tests | ⚠️ Partly | No-model scripts T10–T13; T13 runs the extension with a fake RPC worker process. No CI yet |
 | Type checking | ❌ Not set up | pi loads the TypeScript through jiti, which strips types without checking them |
 
 ## Verification log
@@ -68,6 +69,10 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V33 | Dismiss | RPC: session with a busy record, `/workers-clear`, reopen | ✅ Toast on open; `stopped` record appended; no interrupted worker on reopen |
 | V34 | Regression | T1, T10, T11 | ✅ 6 commands incl. `workers-resume`; 18/18; 24/24 |
 | V35 | Real project with a quit in the middle | a scratch project (`todo-sqlite`): interactive manager in tmux, `claude-code/default`, thinking medium. Prompt: Python + SQLite todo app built by parallel workers (db layer, CLI, tests), then run tests, fix, read-only review. Terminal killed while `tests` was mid tool call; `pi -c`; `/workers-resume` | ✅ Manager wrote the contract (`API.md`) and spawned 3 workers. `db-layer` and `cli` finished and reported before the quit; `tests` was restored as interrupted, its session repaired (1 tool call), resumed in the same file. Manager then ran 39 tests (all pass), spawned a reviewer (no high-severity bugs, 4 medium), and asked about fixes. Live 💭 thinking in the widget throughout. Checked by hand: 39/39 tests, CLI add/done/delete/list/`--open`/error exit 1, `sqlite3` rows and schema, reviewer finding "huge id → OverflowError" confirmed. Total $0.83; 0 orphans |
+| V36 | Health check logic and extension loop | `scripts/test-health.ts` (T13): pure verdicts and timing; the extension with a mocked pi API and fake worker processes (quiet, frozen, looping) | ✅ 33 of 33. Alerts: quiet 1×, unresponsive, looping; `stalled` wait in ~3 s; heartbeat replies kept out of the events log; 0 orphans |
+| V37 | The manager follows up by itself | `scripts/test-health-live.ts` (T14), `claude-code/claude-haiku-5-5`, interval 2 s, stall 15 s, worker in `sleep 120` | ✅ Toast and alert 15 s after the worker went silent; the manager started a turn on its own, called `worker_status sleeper`, judged the sleep legitimate, left it running and told the user. 0 orphans. With `claude-local/claude-haiku-4-5` the test cannot run: that model wrote its tool call as text, so the worker never slept |
+| V38 | Regression | T1 (`--no-extensions -e`), T10, T11, T12 | ✅ 6 commands; 21/21; 24/24; 10/10 |
+| V39 | Health checks in the interactive TUI | tmux 160×50, fullscreen, haiku, interval 2 s, stall 15 s, worker in `sleep 120` | ✅ Widget: `1 may be stuck` and `⚠ quiet 21s ⟳ bash $ sleep 120`; alert message: `⚠ worker sleeper may be stuck (quiet)`, detail line, drawn table, settings, advice; the manager called `worker_status` and left it running. Repeat alert at ~78 s of quiet: the manager checked again and left it. Result at 2m03s; the `⚠` and the summary count cleared. 0 orphans. The repeat alert's `still stuck` header was not seen on screen (checked by T13) |
 | V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
@@ -114,12 +119,17 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 16. **Log of a worker cut off mid tool call may lack its last lines.** When the terminal closes, the manager can
     be gone before that worker exits, so its `.log` has no `ABORTED` / `stopped` lines. The worker still exits
     (no orphans), and its record and session are correct (seen in V30's first run and in V35).
+17. **Health checks cannot tell a silent step from a hang.** A long tool call without output or a model that
+    thinks without streaming is flagged `quiet` after 3 minutes. The manager is told so and usually leaves the worker
+    running, but each alert costs a manager turn. Raise `PI_MULTI_AGENT_STALL_SECONDS` for such work. A loop is only
+    detected when the calls are identical and consecutive.
 
 ## Roadmap
 
 **P1: harden**
 - Automated tests with a fake RPC worker (a scripted JSONL process), so the `Worker` state machine, auto-notify and
-  wait logic can be tested without model calls. Add a CI workflow.
+  wait logic can be tested without model calls. Started in v0.8.0 (`scripts/test-health.ts` has one); extend it
+  to auto-notify and resume, and add a CI workflow.
 - Type checking: a `tsconfig.json` with pi's type packages and `npm run check`.
 - Verify the items under [Not yet verified](#not-yet-verified).
 
@@ -180,3 +190,13 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - Real-project test (V35): a Python + SQLite todo app built by 3 parallel workers plus a reviewer, with a terminal
   kill in the middle and `/workers-resume`. Everything worked; the app was checked by hand. One cosmetic finding:
   known issue 16. The project was a scratch directory, not part of this repo.
+
+### 2026-11-25
+
+- v0.8.0. Health checks. Issue: nobody noticed a stuck worker; the manager only heard from a worker when it
+  finished, and a `worker_wait` on a hung worker blocked until its 30-minute timeout. Fix: while workers run, the
+  manager checks each busy worker every 10 s (`PI_MULTI_AGENT_HEALTH_INTERVAL`): a `get_state` heartbeat plus the
+  time of its last event and repeated tool calls. A quiet (180 s, `PI_MULTI_AGENT_STALL_SECONDS`), unresponsive or
+  looping worker gets a `⚠` warning, a toast, and an alert to the manager LLM, which follows up on its own; a wait
+  on it ends `stalled`. Added `health.ts`, `scripts/test-health.ts` (T13, with a fake RPC worker) and
+  `scripts/test-health-live.ts` (T14). Verified V36–V39.

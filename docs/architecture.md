@@ -1,6 +1,6 @@
 # Architecture
 
-How v0.7.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
+How v0.8.0 works inside, and why it is built this way. For behavior and defaults, see the [Reference](reference.md).
 
 ## Overview
 
@@ -11,8 +11,11 @@ flowchart LR
         CORE["index.ts · ui.ts · report.ts<br/>tools, commands, widget,<br/>viewer, result rendering"]
         WK["worker.ts × N<br/>RPC client · state · logs"]
         RES["resume.ts<br/>records · session repair"]
+        HEALTH["health.ts<br/>heartbeat · stuck verdicts"]
         CORE -- drives --> WK
         CORE -- records --> RES
+        CORE -- every 10 s --> HEALTH
+        HEALTH -- get_state --> WK
     end
     PI["pi --mode rpc<br/>one per worker"]
     LOGS[("run logs<br/>{name}.log · .events.jsonl")]
@@ -27,7 +30,7 @@ flowchart LR
     classDef manager fill:#ECFEFF,stroke:#0891B2,color:#0F172A
     classDef worker fill:#ECFDF5,stroke:#059669,color:#0F172A
     classDef file fill:#FFFBEB,stroke:#D97706,color:#0F172A
-    class CORE,WK,RES manager
+    class CORE,WK,RES,HEALTH manager
     class PI worker
     class LOGS,WSESS,MSESS file
     style MGR fill:#0891B214,stroke:#0891B2,stroke-dasharray:6 4
@@ -41,6 +44,7 @@ flowchart LR
 | `format.ts` | Shared text formatting (status table, legend, reports, numbers) |
 | `resume.ts` | Resume after quit: worker record format and merge, interrupted detection, session repair, old-process check |
 | `report.ts` | Worker result blocks: the LLM text (`formatResultBlock`, `formatRunningBlock`), its parser, and the TUI renderer for tool rows and auto-report messages |
+| `health.ts` | Health checks: settings from the environment, heartbeat, verdict (`assessHealth`), alert timing (`updateHealth`), and the alert text for the manager LLM |
 
 ## Process model
 
@@ -243,6 +247,38 @@ worker's **session file** and the manager's **records** of it, so v0.7.0 resumes
 - **Session location.** New workers get `--session-dir <multi-agent dir>/sessions`, so `pi -c` in the project does
   not open a worker session (before v0.7.0 it did: the worker session was usually the newest).
 
+## Health checks
+
+The manager is responsible for noticing a worker that is stuck, without anyone asking (v0.8.0). The split:
+`health.ts` decides, `index.ts` acts, `worker.ts` provides the inputs.
+
+- **Timer.** `session_start` starts a `setInterval` of `PI_MULTI_AGENT_HEALTH_INTERVAL` (default 10 s, unref'd,
+  cleared in `session_shutdown`). A tick with no busy worker does nothing, so the timer itself costs nothing.
+- **Inputs from `worker.ts`.** `lastEventAt` is set by every session event (in `handleEvent`, deltas included), by
+  dialogs and notifications, and by a new task; **not** by RPC responses, or the heartbeat replies would hide a
+  stall. `dialogs` counts open dialogs. `repeatCount` counts identical tool calls in a row, keyed by the tool name
+  and the full JSON arguments (the one-line summary would make several edits to one file look identical).
+- **Heartbeat.** `Worker.ping()` sends `get_state` with a short timeout and marks the id so its reply stays out of
+  the events log. One heartbeat per worker is in flight at a time (`health.checking`); checks of different workers
+  run in parallel, so a hung worker does not delay the others.
+- **Verdict and timing** are pure functions of the worker and the time (`assessHealth`, `updateHealth`), tested
+  without processes. A problem is identified by its verdict and its start (`since`: the last event for quiet, the
+  first failed heartbeat for unresponsive, the streak start for a loop). A new problem alerts at once; the same one
+  again when it has lasted about twice as long (min: the stall time and 60 s). `health.alerts` only grows, over the
+  whole worker life, so a waiter can compare it with the value when it started.
+- **Acting (`index.ts`).** An alert is a toast for you and, like a result, a `followUp` + `triggerTurn` message for
+  the manager LLM, with the same exceptions: not for `notify: false`, and not while a `worker_wait` covers the
+  worker. The waiter instead sees the alert count grow on its next 400 ms poll and returns `stalled` with the
+  follow-up advice. A custom follow-up message does not count as a pending user message, so it never ends an
+  unrelated wait as `interrupted`.
+- **Display.** `healthNote()` (`format.ts`) puts `⚠ …` before the activity in the status table, widget and viewer.
+  It shows a quiet or loop warning only while `lastEventAt` / `repeatSince` still equal the problem's start, so the
+  warning goes away with the worker's next event instead of at the next check.
+
+Why a verdict, not an automatic fix: a quiet worker may be in a legitimately long step (a build, a slow model), and
+only an LLM that reads the activity can tell. The extension only notices; the manager decides, using the advice in
+the alert (abort a hung tool call, since steering waits for the current step; kill a process that does not answer).
+
 ## Design decisions
 
 | Decision | Why | Alternative considered |
@@ -252,6 +288,8 @@ worker's **session file** and the manager's **records** of it, so v0.7.0 resumes
 | Persist worker sessions by default | full transcript with thinking, viewable in pi and pi-web | `--no-session` (still available through `PI_MULTI_AGENT_WORKER_ARGS`) |
 | Auto-notify with `followUp` + `triggerTurn` | the manager can fire and forget; results are never lost | only `worker_wait` (forces the manager to block) |
 | Polling wait | robust, no missed-event races, trivial to cancel | event-driven promises |
+| Health checks in the extension, alerts to the manager LLM only on a problem | no tokens while all is well; the LLM decides what a quiet worker means | the manager LLM polls `worker_status` on a timer: costs a turn every 10 s and fills its context |
+| Heartbeat with `get_state` | answered by pi's RPC loop even mid task, needs nothing from the worker | OS-level checks (`kill -0`, CPU time): a live but blocked process passes them |
 | Do not wait by default; interrupt a wait on user input | the user can always talk to the manager and steer workers through it | wait by default (v0.1.0): blocked the user for up to 30 min |
 | Resume the work, not the process: records + `--session` + repair | survives any quit, including a crash of the manager; uses only pi's session files and APIs | detached workers behind a socket (roadmap): keeps processes alive, but needs a daemon and process ownership rules |
 | Worker sessions in their own directory | `pi -c` must find the manager after a quit | keep them in the project's list (pi-web shows them, but `pi -c` opened a worker) |
@@ -274,7 +312,7 @@ If a pi upgrade changes any of these, re-run the smoke tests in the [Runbook](..
 
 - CLI: `--mode rpc`, `--name`, `--model`, `--thinking`, `--tools`, `--append-system-prompt`, `--session`,
   `--session-dir`
-- RPC: `get_state`, `prompt`, `steer`, `follow_up`, `abort`, `extension_ui_request/response`, the JSON event stream
+- RPC: `get_state` (also the health heartbeat: `isStreaming`, `isCompacting`), `prompt`, `steer`, `follow_up`, `abort`, `extension_ui_request/response`, the JSON event stream
   (`agent_settled`, `message_update` sub-events, `tool_execution_*`, `queue_update`, `auto_retry_*`, `compaction_*`)
 - Extension API: `registerTool` (`renderCall`/`renderResult`, `promptSnippet`/`promptGuidelines`), `registerCommand`,
   `registerMessageRenderer`, `sendMessage` (`deliverAs`, `triggerTurn`), `ctx.ui.setWidget` (factory and string

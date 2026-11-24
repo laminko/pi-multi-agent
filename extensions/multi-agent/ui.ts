@@ -3,7 +3,7 @@
  */
 
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { INTERRUPTED_HINT, oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
+import { healthNote, INTERRUPTED_HINT, oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
 import type { TranscriptEntry, Worker, WorkerStatus } from "./worker.ts";
 
 // Loose structural types: keeps this file independent of exact pi type exports.
@@ -61,10 +61,14 @@ function tailLine(text: string, max: number): string {
 
 function preview(w: Worker, theme: ThemeLike, max: number): string {
 	if (w.busy) {
+		// Health check warning first (see health.ts), then what the worker does.
+		const note = healthNote(w);
+		const warn = note ? theme.fg("warning", `${note} `) : "";
+		const room = Math.max(10, max - (note ? visibleWidth(note) + 1 : 0));
 		if (w.activity === "thinking" && w.thinkingTail.trim()) {
-			return theme.fg("thinkingText", theme.italic(`💭 ${tailLine(w.thinkingTail, max)}`));
+			return warn + theme.fg("thinkingText", theme.italic(`💭 ${tailLine(w.thinkingTail, room)}`));
 		}
-		return theme.fg("muted", `⟳ ${oneLine(w.activity, max)}`);
+		return warn + theme.fg("muted", `⟳ ${oneLine(w.activity, room)}`);
 	}
 	if (w.status === "error" || w.status === "crashed") return theme.fg("error", oneLine(w.errorMessage ?? w.activity, max));
 	if (w.status === "interrupted") return theme.fg("warning", `↯ ${oneLine(INTERRUPTED_HINT, max - 2)}`);
@@ -118,7 +122,9 @@ function widgetLayout(source: WorkerSource, width: number, theme: ThemeLike): Wi
 	const done = workers.filter((w) => w.status === "idle").length;
 	const failed = workers.filter((w) => w.status === "error" || w.status === "crashed").length;
 	const interrupted = workers.filter((w) => w.status === "interrupted").length;
+	const stuck = workers.filter((w) => healthNote(w)).length;
 	const summary = [`${running} running`, `${done} done`];
+	if (stuck) summary.push(theme.fg("warning", `${stuck} may be stuck`));
 	if (failed) summary.push(`${failed} failed`);
 	if (interrupted) summary.push(theme.fg("warning", `${interrupted} interrupted (/workers-resume)`));
 	const lines = [
@@ -344,7 +350,7 @@ export function createViewer(
 				theme.fg("muted", ` ${statsText(w)}${w.queued ? ` · ${w.queued} queued` : ""}`),
 				theme.fg("dim", ` ${w.model ?? "?"} (${w.thinkingLevel ?? "?"}) · log: ${w.logPath}`),
 				w.busy
-					? theme.fg("warning", ` ⟳ ${oneLine(w.activity, 300)}`)
+					? theme.fg("warning", ` ⟳ ${oneLine(healthNote(w) ? `${healthNote(w)} · ${w.activity}` : w.activity, 300)}`)
 					: w.status === "error" || w.status === "crashed"
 						? theme.fg("error", ` ${oneLine(w.errorMessage ?? w.activity, 300)}`)
 						: w.status === "interrupted"

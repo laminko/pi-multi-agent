@@ -40,6 +40,8 @@ in pi. The `Now` column is a live preview:
 - `💭 …` the tail of the current thinking, while the worker is thinking
 - `⟳ …` the current activity otherwise (`bash $ npm test`, `waiting for model`, `retry 1/3 …`, `compacting context`,
   `waiting for you: …`)
+- `⚠ …` first, if the [health check](#stuck-workers-health-checks) thinks the worker may be stuck: `⚠ quiet 3m05s`,
+  `⚠ not answering`, `⚠ loop ×5`. The summary line then adds `1 may be stuck`
 - `→ …` the start of the final answer, when done
 - the error message, on `error` or `crashed`
 
@@ -126,6 +128,36 @@ A finished worker's result reaches the manager as a `⚑ worker <name> <status>`
 
 `worker_status`, the `worker_wait` progress table and other worker tool rows draw their status tables the same way,
 and keep the legend's alignment. The exact rules are in the [Reference](reference.md#result-format).
+
+## Stuck workers (health checks)
+
+You do not have to watch for stuck workers: while workers run, the manager checks each busy one every 10 s
+(`PI_MULTI_AGENT_HEALTH_INTERVAL`). A check is a status request to the worker process plus a look at its last event;
+it costs no tokens. When a worker may be stuck, three things happen:
+
+1. a warning toast: `Worker build may be stuck (quiet): no output for 3m02s; now: bash $ npm run dev; its process
+   still answers status checks`;
+2. `⚠ quiet 3m02s` before its activity in the widget, `/workers` and `worker_status`;
+3. the manager gets an alert message and follows up on its own: it looks at the worker, then leaves it, aborts and
+   re-instructs it, or kills it, and tells you what it did. In the TUI the alert shows as
+   `⚠ worker build may be stuck (quiet)`.
+
+```
+[20.6s toast] Worker sleeper may be stuck (quiet): no output for 16s; now: bash $ sleep 120; its process still answers status checks
+[21.9s tool]  worker_status {"name":"sleeper"}
+manager: The worker is quiet but healthy: it is still answering status checks, and the only thing running is the
+         intended `sleep 120`, which is a legitimately silent step. I'm leaving it running …
+```
+
+| Warning | Means | Usual cause |
+|---|---|---|
+| `⚠ quiet 3m05s` | no event for 3 min (`PI_MULTI_AGENT_STALL_SECONDS`) | a hung or silent tool call (server in the foreground, a prompt for input, a long build), or a slow model |
+| `⚠ not answering` | the process did not answer 3 status checks in a row | a blocked or hung pi process |
+| `⚠ loop ×5` | the same tool call with the same arguments 5 times in a row | the model retries something that cannot work |
+
+If the problem lasts, the manager is reminded each time it has lasted about twice as long (3, 6, 12 … min). When the
+worker moves again, you get `Worker <name> is making progress again`. A worker that waits for you to answer a dialog
+is not flagged. Exact rules: [Reference](reference.md#health-checks).
 
 ## Log files
 

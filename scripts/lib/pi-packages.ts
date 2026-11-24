@@ -1,8 +1,8 @@
 /**
  * Lets test scripts import the extension's modules under plain Node.
  *
- * Inside pi, extensions get pi's own copies of `@earendil-works/*`. Under Node those imports would fail, so this
- * module registers a resolve hook that looks them up in the node_modules of the `pi` on PATH. Import it before you
+ * Inside pi, extensions get pi's own copies of `@earendil-works/*` and `typebox`. Under Node those imports would fail,
+ * so this module registers a resolve hook that looks them up in the node_modules of the `pi` on PATH. Import it before you
  * import any extension module (use dynamic `import()` for those, because static imports are hoisted).
  *
  * Override with PI_NODE_MODULES=<the node_modules directory that contains @earendil-works/pi-tui>.
@@ -33,7 +33,9 @@ function findPiNodeModules(): string {
 const piParent = pathToFileURL(`${findPiNodeModules()}/`).href;
 registerHooks({
 	resolve(specifier, context, nextResolve) {
-		if (specifier.startsWith("@earendil-works/")) return nextResolve(specifier, { ...context, parentURL: piParent });
+		if (specifier.startsWith("@earendil-works/") || specifier === "typebox" || specifier.startsWith("typebox/")) {
+			return nextResolve(specifier, { ...context, parentURL: piParent });
+		}
 		return nextResolve(specifier, context);
 	},
 });

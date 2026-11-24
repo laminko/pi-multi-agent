@@ -122,6 +122,23 @@ If one of your extensions inside a worker asks a question (confirm, select, inpu
 the manager's UI with the title prefix `[worker <name>]`. Answer it as usual. When the manager has no UI (print mode),
 worker dialogs are cancelled automatically.
 
+## If a worker gets stuck
+
+The manager watches its workers for you. While any worker runs, it checks each busy one every 10 seconds, without
+spending tokens. If a worker has sent nothing for 3 minutes, stops answering, or repeats the same tool call 5 times,
+you get a warning toast, the widget shows `⚠` before its activity, and the manager gets an alert. The manager then
+follows up on its own: it inspects the worker, and leaves it running (a long build is fine), aborts and re-instructs
+it, or kills it. It tells you what it did. If you asked it to wait, the wait ends early so it can follow up.
+
+Tune it before starting pi:
+
+```bash
+PI_MULTI_AGENT_HEALTH_INTERVAL=30 pi      # check every 30 s instead of 10 s (0 or off: no checks)
+PI_MULTI_AGENT_STALL_SECONDS=600 pi       # call a worker quiet only after 10 min (long builds, slow models)
+```
+
+See [Observability](observability.md#stuck-workers-health-checks) for what the warnings mean.
+
 ## Controlling cost
 
 - Every worker has its own context and usage. The widget, `/workers` and `worker_status` show cost per worker.
@@ -168,6 +185,11 @@ system prompt. Full replacement is on the roadmap ([STATUS](../STATUS.md#roadmap
 
 **Do workers share files with the manager?** Yes. They run on the same machine and directory (unless `cwd` is
 set), with your permissions.
+
+**Why did the manager say a worker may be stuck while it was fine?** A tool call that prints nothing (a long test
+run, `sleep`) or a model that thinks for minutes without streaming looks the same as a hang from outside. The
+manager checks and normally leaves such a worker running. If your tasks are often silent for long, raise
+`PI_MULTI_AGENT_STALL_SECONDS`.
 
 **Why didn't I see any thinking?** It depends on the model; see [Observability](observability.md#thinking).
 
