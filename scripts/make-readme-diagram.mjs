@@ -5,8 +5,21 @@
  *   node scripts/make-readme-diagram.mjs
  *
  * Plain SVG (no fonts, scripts or external resources), so GitHub shows it in an <img>; the README picks the
- * version that matches the reader's theme with <picture>.
+ * version that matches the reader's theme with <picture>. The motion is CSS inside the SVG, which browsers play in
+ * an <img> too: lines flow toward their arrowheads, a packet travels along each task/message line, and worker
+ * status dots pulse. With prefers-reduced-motion the image stays still.
  */
+
+/** Animation styles. Dash periods: "8 6" = 14, "2 5" = 7; packets move one full dash period per cycle. */
+const MOTION = `<style>
+.flow-dash{animation:fd .9s linear infinite}@keyframes fd{to{stroke-dashoffset:-14}}
+.flow-dot{animation:fo .7s linear infinite}@keyframes fo{to{stroke-dashoffset:-7}}
+.pk-task{animation:pt 2.2s linear infinite}@keyframes pt{from{stroke-dashoffset:0}to{stroke-dashoffset:-200}}
+.pk-msg{animation:pm 4.2s linear .8s infinite}@keyframes pm{from{stroke-dashoffset:0}to{stroke-dashoffset:-686}}
+.pk-leg{animation:pl 1.6s linear infinite}@keyframes pl{from{stroke-dashoffset:0}to{stroke-dashoffset:-56}}
+.pulse{animation:pu 1.8s ease-in-out infinite}@keyframes pu{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.flow-dash,.flow-dot,.pulse{animation:none}.pk-task,.pk-msg,.pk-leg{display:none}}
+</style>`;
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,11 +54,15 @@ const text = (x, y, s, { size = 13, fill, weight = 400, anchor = "middle" } = {}
 	`<text x="${x}" y="${y}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(s)}</text>`;
 
 /** A card: rounded box, bold title, one or two lines below. */
-function card(t, { x, y, w, h, colors, title, lines = [], accentLine }) {
+function card(t, { x, y, w, h, colors, title, lines = [], accentLine, pulseDelay }) {
 	const cx = x + w / 2;
 	const top = y + h / 2 - (lines.length + (accentLine ? 1 : 0)) * 9 + 4;
 	const out = [
 		`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="${colors.fill}" stroke="${colors.stroke}" stroke-width="2"/>`,
+		// A pulsing status dot marks the card as running.
+		pulseDelay === undefined
+			? ""
+			: `<circle cx="${x + 24}" cy="${y + h / 2}" r="5" fill="${colors.stroke}" class="pulse" style="animation-delay:${pulseDelay}s"/>`,
 		text(cx, top, title, { size: 16, fill: t.text, weight: 700 }),
 	];
 	lines.forEach((l, i) => out.push(text(cx, top + 21 + i * 18, l, { size: 12, fill: t.sub })));
@@ -57,8 +74,12 @@ function svg(name) {
 	const t = THEMES[name];
 	const arrow = (id, color) =>
 		`<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${color}"/></marker>`;
+	const flowClass = (dash) => (dash === "8 6" ? "flow-dash" : dash === "2 5" ? "flow-dot" : "");
 	const path = (d, { dash, marker = "a", start } = {}) =>
-		`<path d="${d}" fill="none" stroke="${t.line}" stroke-width="2" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}"` : ""} marker-end="url(#${marker})"${start ? ` marker-start="url(#${marker})"` : ""}/>`;
+		`<path d="${d}" fill="none" stroke="${t.line}" stroke-width="2" stroke-linejoin="round"${dash ? ` stroke-dasharray="${dash}" class="${flowClass(dash)}"` : ""} marker-end="url(#${marker})"${start ? ` marker-start="url(#${marker})"` : ""}/>`;
+	/** A short bright segment travelling along a solid line (same d), one dash period per animation cycle. */
+	const packet = (d, dash, cls) =>
+		`<path d="${d}" fill="none" stroke="${t.manager.stroke}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${dash}" class="${cls}"/>`;
 	const label = (x, y, s, anchor = "middle") => text(x, y, s, { size: 12, fill: t.muted, anchor });
 
 	// Layout
@@ -73,7 +94,7 @@ function svg(name) {
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="${FONT}" role="img" aria-labelledby="t d">`,
 		`<title id="t">How pi-multi-agent works</title>`,
 		`<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. You can also message a worker directly. A live view shows each worker's thinking, tool calls and cost.</desc>`,
-		`<defs>${arrow("a", t.line)}<pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="${t.grid}" stroke-width="1"/></pattern></defs>`,
+		`<defs>${MOTION}${arrow("a", t.line)}<pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="${t.grid}" stroke-width="1"/></pattern></defs>`,
 		`<rect width="${W}" height="${H}" fill="${t.bg}"/>`,
 		// Title
 		`<circle cx="46" cy="43" r="6" fill="${t.manager.stroke}"/>`,
@@ -89,7 +110,7 @@ function svg(name) {
 		text(region.x + 20, region.y + 28, "WORKERS · separate pi processes", { size: 12, fill: t.region.label, weight: 700, anchor: "start" }),
 		text(region.x + 20, region.y + 48, "own context, model and tools · never see your chat", { size: 12, fill: t.sub, anchor: "start" }),
 		...workers.map((job, i) =>
-			card(t, { x: region.x + 58, y: wy(i), w: 320, h: 62, colors: t.worker, title: `Worker ${"ABC"[i]}`, lines: [job] }),
+			card(t, { x: region.x + 58, y: wy(i), w: 320, h: 62, colors: t.worker, title: `Worker ${"ABC"[i]}`, lines: [job], pulseDelay: i * 0.6 }),
 		),
 		// Nodes
 		card(t, { ...you, colors: t.you, title: "You", lines: ["chat as usual"] }),
@@ -101,10 +122,12 @@ function svg(name) {
 		label(245, 314, "never blocked"),
 		// You -> a worker directly, above the manager
 		path(`M${you.x + you.w / 2} ${you.y - 2}V196H${region.x - 2}`),
+		packet(`M${you.x + you.w / 2} ${you.y - 2}V196H${region.x - 2}`, "14 672", "pk-msg"),
 		label(425, 186, "talk to a worker directly"),
 		label(425, 214, "/worker-send · m in /workers"),
 		// Manager -> workers (tasks), workers -> manager (results)
 		path(`M${manager.x + manager.w + 2} 276H${region.x - 2}`),
+		packet(`M${manager.x + manager.w + 2} 276H${region.x - 2}`, "14 186", "pk-task"),
 		label(625, 265, "self-contained tasks"),
 		path(`M${region.x - 2} 314H${manager.x + manager.w + 2}`, { dash: "8 6" }),
 		label(625, 336, "results, when ready"),
@@ -123,7 +146,8 @@ function svg(name) {
 			// Same gap between items: each takes a 44px line sample, 12px space and its text (~7.3px per character).
 			const width = (s) => 56 + s.length * 7.3;
 			const x = 640 + items.slice(0, i).reduce((sum, [, n]) => sum + width(n) + 36, 0);
-			return `${path(`M${x} 526H${x + 44}`, { dash })}${text(x + 56, 530, name, { size: 12, fill: t.muted, anchor: "start" })}`;
+			const sample = `M${x} 526H${x + 44}`;
+			return `${path(sample, { dash })}${dash ? "" : packet(sample, "8 48", "pk-leg")}${text(x + 56, 530, name, { size: 12, fill: t.muted, anchor: "start" })}`;
 		}),
 		`</svg>`,
 	];
