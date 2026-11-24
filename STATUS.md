@@ -5,7 +5,7 @@
 | **Version** | 0.7.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
-| **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
+| **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default`, `claude-code/claude-haiku-5-5`; real-project test: Python 3.15, SQLite 3.54 |
 
 ## Component status
 
@@ -67,6 +67,7 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V32 | Resume by asking the manager | `pi -p -c "My workers got interrupted. Please continue them…"` | ✅ `worker_resume` (not `worker_spawn`), then the result. First run exposed a race: `worker_resume` + `worker_wait` in one message, the wait saw the new worker `starting` and returned at once. After the fix: one wait, `status="done"` |
 | V33 | Dismiss | RPC: session with a busy record, `/workers-clear`, reopen | ✅ Toast on open; `stopped` record appended; no interrupted worker on reopen |
 | V34 | Regression | T1, T10, T11 | ✅ 6 commands incl. `workers-resume`; 18/18; 24/24 |
+| V35 | Real project with a quit in the middle | `~/projects/todo-sqlite`: interactive manager in tmux, `claude-code/default`, thinking medium. Prompt: Python + SQLite todo app built by parallel workers (db layer, CLI, tests), then run tests, fix, read-only review. Terminal killed while `tests` was mid tool call; `pi -c`; `/workers-resume` | ✅ Manager wrote the contract (`API.md`) and spawned 3 workers. `db-layer` and `cli` finished and reported before the quit; `tests` was restored as interrupted, its session repaired (1 tool call), resumed in the same file. Manager then ran 39 tests (all pass), spawned a reviewer (no high-severity bugs, 4 medium), and asked about fixes. Live 💭 thinking in the widget throughout. Checked by hand: 39/39 tests, CLI add/done/delete/list/`--open`/error exit 1, `sqlite3` rows and schema, reviewer finding "huge id → OverflowError" confirmed. Total $0.83; 0 orphans |
 | V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
@@ -110,6 +111,9 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
     with the [Runbook maintenance](RUNBOOK.md#maintenance) commands.
 15. **`/fork` copies worker records.** A forked manager session can offer the same interrupted worker as the
     original; resume it from one of them only.
+16. **Log of a worker cut off mid tool call may lack its last lines.** When the terminal closes, the manager can
+    be gone before that worker exits, so its `.log` has no `ABORTED` / `stopped` lines. The worker still exits
+    (no orphans), and its record and session are correct (seen in V30's first run and in V35).
 
 ## Roadmap
 
@@ -173,3 +177,6 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   worker sessions go to `~/.pi/agent/multi-agent/sessions/`. Found and fixed during testing: a stale note to the
   model (V31) and a wait race with parallel tool calls (V32), which also affected `worker_spawn` + `worker_wait`.
   Added `scripts/test-resume.ts` (T12). Verified V28–V34.
+- Real-project test (V35): a Python + SQLite todo app built by 3 parallel workers plus a reviewer, with a terminal
+  kill in the middle and `/workers-resume`. Everything worked; the app was checked by hand. One cosmetic finding:
+  known issue 16. The project is in `~/projects/todo-sqlite` (not part of this repo).
