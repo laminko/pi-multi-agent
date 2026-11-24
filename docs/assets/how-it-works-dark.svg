@@ -7,8 +7,8 @@
 .pk-task{animation:pt 2.2s linear infinite}@keyframes pt{from{stroke-dashoffset:0}to{stroke-dashoffset:-200}}
 .pk-msg{animation:pm 4.2s linear .8s infinite}@keyframes pm{from{stroke-dashoffset:0}to{stroke-dashoffset:-686}}
 .pk-leg{animation:pl 1.6s linear infinite}@keyframes pl{from{stroke-dashoffset:0}to{stroke-dashoffset:-56}}
-.pulse{animation:pu 1.8s ease-in-out infinite}@keyframes pu{0%,100%{opacity:1}50%{opacity:.25}}
-@media (prefers-reduced-motion:reduce){.flow-dash,.flow-dot,.pulse{animation:none}.pk-task,.pk-msg,.pk-leg{display:none}}
+.spin{transform-box:fill-box;transform-origin:center;animation:sp 4s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.flow-dash,.flow-dot,.spin{animation:none}.pk-task,.pk-msg,.pk-leg{display:none}}
 </style><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748B"/></marker><pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#111A2B" stroke-width="1"/></pattern></defs>
 <rect width="1200" height="584" fill="#060A14"/>
 <circle cx="46" cy="43" r="6" fill="#22D3EE"/>
@@ -20,15 +20,15 @@
 <text x="740" y="160" font-size="12" font-weight="700" fill="#6EE7B7" text-anchor="start">WORKERS · separate pi processes</text>
 <text x="740" y="180" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">own context, model and tools · never see your chat</text>
 <rect x="778" y="206" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
-<circle cx="802" cy="237" r="5" fill="#34D399" class="pulse" style="animation-delay:0s"/>
+<path d="M812.39 235.36L814.91 235.73L814.91 238.27L812.39 238.64L811.68 240.36L813.20 242.40L811.40 244.20L809.36 242.68L807.64 243.39L807.27 245.91L804.73 245.91L804.36 243.39L802.64 242.68L800.60 244.20L798.80 242.40L800.32 240.36L799.61 238.64L797.09 238.27L797.09 235.73L799.61 235.36L800.32 233.64L798.80 231.60L800.60 229.80L802.64 231.32L804.36 230.61L804.73 228.09L807.27 228.09L807.64 230.61L809.36 231.32L811.40 229.80L813.20 231.60L811.68 233.64Z M808.6 237A2.6 2.6 0 1 0 803.4 237A2.6 2.6 0 1 0 808.6 237Z" fill="#34D399" fill-rule="evenodd" class="spin" style="animation-duration:3.2s"/>
 <text x="938" y="232" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker A</text>
 <text x="938" y="253" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">reviewing the API</text>
 <rect x="778" y="296" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
-<circle cx="802" cy="327" r="5" fill="#34D399" class="pulse" style="animation-delay:0.6s"/>
+<path d="M812.39 325.36L814.91 325.73L814.91 328.27L812.39 328.64L811.68 330.36L813.20 332.40L811.40 334.20L809.36 332.68L807.64 333.39L807.27 335.91L804.73 335.91L804.36 333.39L802.64 332.68L800.60 334.20L798.80 332.40L800.32 330.36L799.61 328.64L797.09 328.27L797.09 325.73L799.61 325.36L800.32 323.64L798.80 321.60L800.60 319.80L802.64 321.32L804.36 320.61L804.73 318.09L807.27 318.09L807.64 320.61L809.36 321.32L811.40 319.80L813.20 321.60L811.68 323.64Z M808.6 327A2.6 2.6 0 1 0 803.4 327A2.6 2.6 0 1 0 808.6 327Z" fill="#34D399" fill-rule="evenodd" class="spin" style="animation-duration:4s"/>
 <text x="938" y="322" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker B</text>
 <text x="938" y="343" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">writing tests</text>
 <rect x="778" y="386" width="320" height="62" rx="12" fill="#0A2A20" stroke="#34D399" stroke-width="2"/>
-<circle cx="802" cy="417" r="5" fill="#34D399" class="pulse" style="animation-delay:1.2s"/>
+<path d="M812.39 415.36L814.91 415.73L814.91 418.27L812.39 418.64L811.68 420.36L813.20 422.40L811.40 424.20L809.36 422.68L807.64 423.39L807.27 425.91L804.73 425.91L804.36 423.39L802.64 422.68L800.60 424.20L798.80 422.40L800.32 420.36L799.61 418.64L797.09 418.27L797.09 415.73L799.61 415.36L800.32 413.64L798.80 411.60L800.60 409.80L802.64 411.32L804.36 410.61L804.73 408.09L807.27 408.09L807.64 410.61L809.36 411.32L811.40 409.80L813.20 411.60L811.68 413.64Z M808.6 417A2.6 2.6 0 1 0 803.4 417A2.6 2.6 0 1 0 808.6 417Z" fill="#34D399" fill-rule="evenodd" class="spin" style="animation-duration:4.8s"/>
 <text x="938" y="412" font-size="16" font-weight="700" fill="#F1F5F9" text-anchor="middle">Worker C</text>
 <text x="938" y="433" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">updating the docs</text>
 <rect x="40" y="262" width="140" height="64" rx="12" fill="#1E293B" stroke="#94A3B8" stroke-width="2"/>

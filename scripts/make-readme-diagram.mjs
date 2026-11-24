@@ -6,8 +6,8 @@
  *
  * Plain SVG (no fonts, scripts or external resources), so GitHub shows it in an <img>; the README picks the
  * version that matches the reader's theme with <picture>. The motion is CSS inside the SVG, which browsers play in
- * an <img> too: lines flow toward their arrowheads, a packet travels along each task/message line, and worker
- * status dots pulse. With prefers-reduced-motion the image stays still.
+ * an <img> too: lines flow toward their arrowheads, a packet travels along each task/message line, and each
+ * worker's cog spins. With prefers-reduced-motion the image stays still.
  */
 
 /** Animation styles. Dash periods: "8 6" = 14, "2 5" = 7; packets move one full dash period per cycle. */
@@ -17,8 +17,8 @@ const MOTION = `<style>
 .pk-task{animation:pt 2.2s linear infinite}@keyframes pt{from{stroke-dashoffset:0}to{stroke-dashoffset:-200}}
 .pk-msg{animation:pm 4.2s linear .8s infinite}@keyframes pm{from{stroke-dashoffset:0}to{stroke-dashoffset:-686}}
 .pk-leg{animation:pl 1.6s linear infinite}@keyframes pl{from{stroke-dashoffset:0}to{stroke-dashoffset:-56}}
-.pulse{animation:pu 1.8s ease-in-out infinite}@keyframes pu{0%,100%{opacity:1}50%{opacity:.25}}
-@media (prefers-reduced-motion:reduce){.flow-dash,.flow-dot,.pulse{animation:none}.pk-task,.pk-msg,.pk-leg{display:none}}
+.spin{transform-box:fill-box;transform-origin:center;animation:sp 4s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.flow-dash,.flow-dot,.spin{animation:none}.pk-task,.pk-msg,.pk-leg{display:none}}
 </style>`;
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -53,16 +53,28 @@ const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, 
 const text = (x, y, s, { size = 13, fill, weight = 400, anchor = "middle" } = {}) =>
 	`<text x="${x}" y="${y}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(s)}</text>`;
 
+/** A cog centred on (cx, cy): `teeth` teeth between radius rIn and rOut, and a hole (drawn with evenodd). */
+function cogPath(cx, cy, { teeth = 8, rOut = 9, rIn = 6.6, hole = 2.6 } = {}) {
+	const pitch = (2 * Math.PI) / teeth;
+	const pt = (r, a) => `${(cx + r * Math.cos(a)).toFixed(2)} ${(cy + r * Math.sin(a)).toFixed(2)}`;
+	const rim = [];
+	for (let i = 0; i < teeth; i++) {
+		const a = i * pitch;
+		rim.push(pt(rIn, a - 0.32 * pitch), pt(rOut, a - 0.18 * pitch), pt(rOut, a + 0.18 * pitch), pt(rIn, a + 0.32 * pitch));
+	}
+	return `M${rim.join("L")}Z M${cx + hole} ${cy}A${hole} ${hole} 0 1 0 ${cx - hole} ${cy}A${hole} ${hole} 0 1 0 ${cx + hole} ${cy}Z`;
+}
+
 /** A card: rounded box, bold title, one or two lines below. */
-function card(t, { x, y, w, h, colors, title, lines = [], accentLine, pulseDelay }) {
+function card(t, { x, y, w, h, colors, title, lines = [], accentLine, cogSeconds }) {
 	const cx = x + w / 2;
 	const top = y + h / 2 - (lines.length + (accentLine ? 1 : 0)) * 9 + 4;
 	const out = [
 		`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12" fill="${colors.fill}" stroke="${colors.stroke}" stroke-width="2"/>`,
-		// A pulsing status dot marks the card as running.
-		pulseDelay === undefined
+		// A spinning cog marks the card as working.
+		cogSeconds === undefined
 			? ""
-			: `<circle cx="${x + 24}" cy="${y + h / 2}" r="5" fill="${colors.stroke}" class="pulse" style="animation-delay:${pulseDelay}s"/>`,
+			: `<path d="${cogPath(x + 28, y + h / 2)}" fill="${colors.stroke}" fill-rule="evenodd" class="spin" style="animation-duration:${cogSeconds}s"/>`,
 		text(cx, top, title, { size: 16, fill: t.text, weight: 700 }),
 	];
 	lines.forEach((l, i) => out.push(text(cx, top + 21 + i * 18, l, { size: 12, fill: t.sub })));
@@ -110,7 +122,7 @@ function svg(name) {
 		text(region.x + 20, region.y + 28, "WORKERS · separate pi processes", { size: 12, fill: t.region.label, weight: 700, anchor: "start" }),
 		text(region.x + 20, region.y + 48, "own context, model and tools · never see your chat", { size: 12, fill: t.sub, anchor: "start" }),
 		...workers.map((job, i) =>
-			card(t, { x: region.x + 58, y: wy(i), w: 320, h: 62, colors: t.worker, title: `Worker ${"ABC"[i]}`, lines: [job], pulseDelay: i * 0.6 }),
+			card(t, { x: region.x + 58, y: wy(i), w: 320, h: 62, colors: t.worker, title: `Worker ${"ABC"[i]}`, lines: [job], cogSeconds: [3.2, 4, 4.8][i] }),
 		),
 		// Nodes
 		card(t, { ...you, colors: t.you, title: "You", lines: ["chat as usual"] }),
