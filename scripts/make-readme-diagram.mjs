@@ -72,7 +72,7 @@ function svg(name) {
 	const parts = [
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="${FONT}" role="img" aria-labelledby="t d">`,
 		`<title id="t">How pi-multi-agent works</title>`,
-		`<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. A live view shows each worker's thinking, tool calls and cost.</desc>`,
+		`<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. You can also message a worker directly. A live view shows each worker's thinking, tool calls and cost.</desc>`,
 		`<defs>${arrow("a", t.line)}<pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="${t.grid}" stroke-width="1"/></pattern></defs>`,
 		`<rect width="${W}" height="${H}" fill="${t.bg}"/>`,
 		// Title
@@ -99,6 +99,10 @@ function svg(name) {
 		path(`M${you.x + you.w + 2} 294H${manager.x - 2}`, { start: true }),
 		label(245, 284, "chat"),
 		label(245, 314, "never blocked"),
+		// You -> a worker directly, above the manager
+		path(`M${you.x + you.w / 2} ${you.y - 2}V196H${region.x - 2}`),
+		label(425, 186, "talk to a worker directly"),
+		label(425, 214, "/worker-send · m in /workers"),
 		// Manager -> workers (tasks), workers -> manager (results)
 		path(`M${manager.x + manager.w + 2} 276H${region.x - 2}`),
 		label(625, 265, "self-contained tasks"),
@@ -112,11 +116,13 @@ function svg(name) {
 		label(215, 437, "you watch"),
 		// Legend
 		...[
-			["", "task"],
+			["", "task / message"],
 			["8 6", "result"],
 			["2 5", "live update"],
-		].map(([dash, name], i) => {
-			const x = 720 + i * 150;
+		].map(([dash, name], i, items) => {
+			// Same gap between items: each takes a 44px line sample, 12px space and its text (~7.3px per character).
+			const width = (s) => 56 + s.length * 7.3;
+			const x = 640 + items.slice(0, i).reduce((sum, [, n]) => sum + width(n) + 36, 0);
 			return `${path(`M${x} 526H${x + 44}`, { dash })}${text(x + 56, 530, name, { size: 12, fill: t.muted, anchor: "start" })}`;
 		}),
 		`</svg>`,

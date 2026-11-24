@@ -5,7 +5,7 @@ them think while they work.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/how-it-works-dark.svg">
-  <img src="docs/assets/how-it-works-light.svg" alt="You chat with your pi, the manager. It sends self-contained tasks to worker pis, separate processes with their own context, model and tools, and gets their results back when ready. A live view shows each worker's thinking, tool calls and cost." width="100%">
+  <img src="docs/assets/how-it-works-light.svg" alt="You chat with your pi, the manager. It sends self-contained tasks to worker pis, separate processes with their own context, model and tools, and gets their results back when ready. You can also message a worker directly. A live view shows each worker's thinking, tool calls and cost." width="100%">
 </picture>
 
 ## Install

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 584" width="1200" height="584" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-labelledby="t d">
 <title id="t">How pi-multi-agent works</title>
-<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. A live view shows each worker's thinking, tool calls and cost.</desc>
+<desc id="d">You chat with your pi, the manager. It sends self-contained tasks to worker pis, which are separate processes with their own context, model and tools, and gets their results back when they are ready. You can also message a worker directly. A live view shows each worker's thinking, tool calls and cost.</desc>
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#64748B"/></marker><pattern id="g" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#111A2B" stroke-width="1"/></pattern></defs>
 <rect width="1200" height="584" fill="#060A14"/>
 <circle cx="46" cy="43" r="6" fill="#22D3EE"/>
@@ -33,6 +33,9 @@
 <path d="M182 294H308" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#a)"/>
 <text x="245" y="284" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">chat</text>
 <text x="245" y="314" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">never blocked</text>
+<path d="M110 260V196H718" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="425" y="186" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">talk to a worker directly</text>
+<text x="425" y="214" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">/worker-send · m in /workers</text>
 <path d="M532 276H718" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/>
 <text x="625" y="265" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">self-contained tasks</text>
 <path d="M718 314H532" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#a)"/>
@@ -42,7 +45,7 @@
 <text x="625" y="470" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">thinking · tools · cost</text>
 <path d="M308 448H110V328" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/>
 <text x="215" y="437" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="middle">you watch</text>
-<path d="M720 526H764" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/><text x="776" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">task</text>
-<path d="M870 526H914" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#a)"/><text x="926" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">result</text>
-<path d="M1020 526H1064" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/><text x="1076" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">live update</text>
+<path d="M640 526H684" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" marker-end="url(#a)"/><text x="696" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">task / message</text>
+<path d="M834.2 526H878.2" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#a)"/><text x="890.2" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">result</text>
+<path d="M970 526H1014" fill="none" stroke="#64748B" stroke-width="2" stroke-linejoin="round" stroke-dasharray="2 5" marker-end="url(#a)"/><text x="1026" y="530" font-size="12" font-weight="400" fill="#94A3B8" text-anchor="start">live update</text>
 </svg>
