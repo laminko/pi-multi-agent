@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 — 2026-11-24
+
+Many workers: nothing important is hidden. There is still no scrollbar.
+
+### Changed
+
+- Widget rows are sorted: running workers first (in spawn order), then error/crashed, then done/aborted, then
+  stopped; the last three newest first. Before, rows were in spawn order, so past 8 workers the newest, running ones
+  were hidden.
+- The `… N more` line now says what is hidden, e.g. `… 4 more (3 done, 1 stopped)  ·  /workers to see all`.
+- Viewer tab bar: when the tabs do not fit, it shows a window that always contains the current worker, with `‹ N` /
+  `N ›` counting the hidden tabs on each side. The window moves only when needed, and the `worker i/N` counter is
+  never cut off. Before, the bar was cut at the terminal width and could hide the current tab.
+
+### Added
+
+- `PI_MULTI_AGENT_WIDGET_ROWS` (default 8): maximum worker rows in the widget.
+- Mouse: a click on the `… N more` line opens the viewer on the first hidden worker; a click on a `‹ N` / `N ›` marker
+  switches to the nearest hidden worker on that side.
+- `scripts/test-ui-overflow.ts` (Runbook T10): 18 rendering and click checks with fake workers, no model calls.
+
+### Tested
+
+- T10: 18 of 18 PASS.
+- Live in tmux (150×45, haiku, 10 workers, `PI_MULTI_AGENT_MAX_WORKERS=12`): 8 rows and `… 2 more (2 running)`; a click
+  on that line opened `lesson-worker-9` with `‹ 4 … 1 ›`; `←` reached `worker 1/10` and wrapped to `worker 10/10` with
+  the tab visible. No orphan processes.
+
 ## 0.4.0 — 2026-11-24
 
 Mouse support in pi's fullscreen mode. Every mouse action also has a key.

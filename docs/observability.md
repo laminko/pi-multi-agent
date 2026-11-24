@@ -43,6 +43,21 @@ in pi. The `Now` column is a live preview:
 - `→ …` the start of the final answer, when done
 - the error message, on `error` or `crashed`
 
+**Row order.** Running workers come first, in the order they were spawned, so their rows stay put while they work.
+Then workers with an error or crash, then finished (done or aborted) ones, then stopped ones; in those groups the
+worker that finished most recently comes first. A row moves down when its worker finishes.
+
+**Many workers.** There is no scrollbar. The widget shows up to 8 worker rows (`PI_MULTI_AGENT_WIDGET_ROWS`) and
+folds the rest into one line that says what is hidden:
+
+```
+ ●   lesson-worker-8      1      1  2.6k    2    80  $0.0005   59s  ⟳ bash $ sleep 90
+ … 2 more (2 running)  ·  /workers to see all
+```
+
+Because running workers sort first, the hidden ones are normally finished or stopped. They are hidden only when more
+workers are running than there are rows. `/workers` reaches every worker; `/workers-clear` removes stopped ones.
+
 In RPC hosts (pi-web, IDE integrations) the widget is sent as plain text and refreshed about once per second.
 
 In fullscreen mode, click a worker row to open the viewer on that worker. See [Mouse](reference.md#mouse).
@@ -68,6 +83,14 @@ In fullscreen mode, click a worker row to open the viewer on that worker. See [M
 
 The first line is a tab bar, one tab per worker. In fullscreen mode, click a tab to switch, use the wheel to scroll,
 and click an action on the last line.
+
+When the tabs do not fit, the bar shows a window of them that always contains the current worker, with `‹ N` and
+`N ›` counting the hidden tabs on each side (click one to step to that side). The window moves only when the current
+tab would leave it:
+
+```
+ ‹ 4    ● lesson-worker-5     ● lesson-worker-6     ● lesson-worker-7     ● lesson-worker-8   [ lesson-worker-9 ] ● running  1 ›  worker 9/10
+```
 
 - The header shows status, stats, model and thinking level, the log path, and the current activity or error.
 - The body follows live output; scrolling up pauses following (`⏸ scrolled N`), and `End` resumes it.

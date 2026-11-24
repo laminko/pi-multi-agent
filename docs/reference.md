@@ -1,6 +1,6 @@
 # Reference
 
-Exact reference for v0.4.0: tools, commands, keys, statuses, files, limits and environment variables.
+Exact reference for v0.5.0: tools, commands, keys, statuses, files, limits and environment variables.
 For how to use them, see the [User Guide](user-guide.md).
 
 - [Tools](#tools)
@@ -175,6 +175,10 @@ is per task.
 | `k` | Kill the worker (asks for confirmation) |
 | `Esc`, `Ctrl+C`, `q` | Close |
 
+When the tabs do not fit the width, the tab bar shows a window of tabs that always contains the current worker, and
+`‹ N` / `N ›` count the hidden tabs on each side. The window moves only when the current tab would leave it. `←`/`→`
+reach every worker, and wrap around at the ends. The `worker i/N` counter is always visible.
+
 ## Mouse
 
 Mouse input works only in pi's fullscreen mode (`tuiMode: "fullscreen"`, the default). In regular mode the terminal
@@ -184,7 +188,9 @@ keeps the mouse, so use the keys. Every mouse action also has a key.
 |---|---|---|
 | Widget, worker row | Left click | Open the viewer on that worker |
 | Widget, summary or column header | Left click | Open the viewer on the first worker |
+| Widget, `… N more` line | Left click | Open the viewer on the first hidden worker |
 | Viewer, tab bar (line 1) | Left click on a tab | Switch to that worker |
+| Viewer, tab bar `‹ N` / `N ›` marker | Left click | Switch to the nearest hidden worker on that side |
 | Viewer, any line | Wheel | Scroll the transcript |
 | Viewer, help line (last line) | Left click on `End follow`, `m message`, `a abort`, `k kill`, `esc close` | The same as the key |
 
@@ -268,6 +274,7 @@ These are read when the manager loads the extension.
 | Variable | Default | Meaning |
 |---|---|---|
 | `PI_MULTI_AGENT_MAX_WORKERS` | `8` | Maximum number of live (not stopped/crashed) workers |
+| `PI_MULTI_AGENT_WIDGET_ROWS` | `8` | Maximum worker rows in the widget; the rest fold into one `… N more` line |
 | `PI_MULTI_AGENT_DIR` | `<pi agent dir>/multi-agent` | Root for run directories |
 | `PI_MULTI_AGENT_WORKER_ARGS` | none | Extra CLI args for every worker, split on whitespace (no quoting). E.g. `--no-session`, `--session-dir /path`, `--no-extensions` |
 
@@ -289,6 +296,6 @@ Set by the extension on worker processes:
 | Default `worker_wait` / `wait: true` timeout | 1800 s |
 | Tool result size | 40 KB (shared across reported workers, ≥ 2 KB each) |
 | In-memory transcript (viewer) | last 400 entries, 20,000 chars per entry (the `.log` keeps everything) |
-| Widget rows | 8 workers (then `… N more`) |
+| Widget rows | 8 workers (`PI_MULTI_AGENT_WIDGET_ROWS`), then one `… N more (<count per status>)` line. Order: running (spawn order), error/crashed, done/aborted, stopped; the last three newest first |
 | Widget refresh | ≤ every 100 ms (TUI), ≤ every 1 s (RPC hosts), plus a 1 s tick while workers run |
 | Shutdown escalation | abort if busy (≤ 5 s) → close stdin (wait 3 s) → SIGTERM (2 s) → SIGTERM again (2 s; pi exits at once) → SIGKILL |

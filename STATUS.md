@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.4.0 |
+| **Version** | 0.5.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-24 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default` |
@@ -15,10 +15,10 @@
 | Manager tools | ✅ Done · mostly verified | `worker_spawn`, `worker_wait`, `worker_status` used by a real manager LLM. `worker_send` was verified for idle workers only. `worker_stop` was not driven by an LLM yet (its underlying abort/stop is verified) |
 | Auto-notify | ✅ Done · verified | The result is delivered and the manager reacts on its own. A user toast shows for each finished worker (V15) |
 | Non-blocking manager | ✅ Done · verified | The manager does not wait after a spawn (V15). Typing ends a `worker_wait` in < 1 s (V14) |
-| Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20) |
+| Widget | ✅ Done · verified | TUI component and plain-text lines for RPC hosts. Status-table columns with a header row (V20). Running workers first; `… N more (…)` past 8 rows (V24, V25) |
 | Mouse (fullscreen) | ✅ Done · verified | Widget row click, viewer tab click, wheel, help-line actions (V22, V23) |
 | Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
-| `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message. The `a`/`k` keys were not exercised |
+| `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message, tab window for many workers (V24, V25). The `a`/`k` keys were not exercised |
 | Slash commands | ⚠️ Partly verified | `/workers` verified; `/worker-send`, `/worker-stop` and `/workers-clear` not exercised |
 | Logs, result files, event log | ✅ Done · verified | Event log compaction verified (40 KB → 14 KB) |
 | Dialog forwarding from workers | ⚠️ Implemented, untested | No extension raised a dialog during testing |
@@ -55,6 +55,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V22 | Mouse logic | fake events into `createWidgetComponent` / `createViewer` | ✅ 7 of 7 |
 | V23 | Mouse in fullscreen TUI | tmux 150×45, SGR press/release sequences | ✅ 3 of 3: row → viewer on `worker-2`; tab → `worker-1`; `esc close` → closed |
 | V21 | Regression after 0.3.0 | T1, T7, T7 follow-up, T8 | ✅ T1 5 commands incl. `workers-legend`; T7 210 ms; follow-up 213 ms; T8 0 waits, 1 toast |
+| V24 | Many workers, rendering logic | `scripts/test-ui-overflow.ts` (T10): fake workers, pi-tui width functions | ✅ 18 of 18: row order, `… 4 more (3 done, 1 stopped)`, `PI_MULTI_AGENT_WIDGET_ROWS=3`, 4 widget clicks, tab window at widths 120/80/60 and long names, 2 marker clicks |
+| V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
 
@@ -62,7 +64,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 - `worker_send` with `steer` / `followUp` while a worker is busy (RPC `steer` / `follow_up`).
 - `worker_stop` called by the manager LLM; `/worker-send`, `/worker-stop`, `/workers-clear`; viewer keys `a` and `k`.
 - `worker_wait` timeout and `Esc`-cancel paths. (The user-message interrupt path is verified: V14, V16, V17.)
-- `PI_MULTI_AGENT_MAX_WORKERS`, `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`.
+- `PI_MULTI_AGENT_DIR`, `PI_MULTI_AGENT_WORKER_ARGS`. (`PI_MULTI_AGENT_MAX_WORKERS` raised to 12: verified in V25.)
+- The widget reordering while workers finish, seen live (V24 checks the order logic only).
 - Retry and compaction events inside long-running workers.
 - A manager hosted by pi-web; Linux; Windows.
 - Two managers running at once (they share the `latest` symlink).
@@ -133,3 +136,8 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
   command. Verified V19–V21.
 - v0.2.1. Verified the follow-up path (V16) and the interactive TUI (V17). Found and fixed 2 defects: the done
   toast showed as a warning, and in 1 of 2 T8 runs the manager used `wait: true` on `worker_spawn`. Verified V18.
+- v0.5.0. Many workers. Issue: past 8 workers the widget showed the 8 oldest (in spawn order) and `… N more`, so
+  newly spawned, running workers were the hidden ones; the viewer tab bar was cut off at the terminal width, which
+  could hide the current tab and the `worker i/N` counter. Fix: running workers sort first, the more-line names the
+  hidden statuses and is clickable, `PI_MULTI_AGENT_WIDGET_ROWS`; the tab bar shows a window with `‹ N` / `N ›`
+  markers. Added `scripts/test-ui-overflow.ts` (T10). Verified V24, V25.

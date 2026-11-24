@@ -31,6 +31,7 @@ Commands assume the repo is at `/path/to/pi-multi-agent` and pi's agent dir is `
 | Test: typing interrupts `worker_wait` | `node scripts/test-wait-interrupt.ts` (T7) |
 | Test: manager does not wait; result auto-reported | `node scripts/test-auto-report.ts` (T8) |
 | Test: interrupt in the interactive TUI | tmux recipe (T9) |
+| Test: widget and viewer with many workers (no model calls) | `node scripts/test-ui-overflow.ts` (T10) |
 
 ## Prerequisites
 
@@ -196,6 +197,23 @@ tmux kill-session -t tuitest
 
 **Expected:** `Wait stopped because the user sent a message` within 1 s, the manager answers `OK`, then the toast
 `Worker s3 done` (no `Warning:` prefix), and then `⚑ worker s3 done`.
+
+### T10. Many workers: widget overflow and viewer tabs
+
+Free, 1 s. No model calls: the workers are fakes rendered with pi's real TUI functions.
+
+```bash
+node scripts/test-ui-overflow.ts        # add -v to print the rendered widget and tab bars
+```
+
+**Expected:** 18 `PASS` lines and `all passed`. They cover the widget row order, the `… N more (…)` line,
+`PI_MULTI_AGENT_WIDGET_ROWS`, widget clicks, and the viewer tab window at widths 120, 80 and 60 (current tab and
+counter always visible, markers only where tabs are hidden, marker clicks). The script finds pi's packages through the
+`pi` on `PATH`; if that fails, set `PI_NODE_MODULES` to the `node_modules` directory that contains
+`@earendil-works/pi-tui`.
+
+To see it live (about $0.03 with haiku), start pi with `PI_MULTI_AGENT_MAX_WORKERS=12` and ask for 10 workers that
+each run `sleep 90`. The widget shows 8 rows and `… 2 more (2 running)`; `/workers` then shows `‹ N` / `N ›` markers.
 
 ## Operating a session
 
