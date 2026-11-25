@@ -6,6 +6,25 @@ export function fmtTokens(n: number): string {
 	return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/** Share of the model's context window in use, e.g. "27%", "0.4%"; undefined if the window is unknown. */
+export function contextPercent(w: Worker): number | undefined {
+	if (!w.contextWindow) return undefined;
+	return (w.usage.contextTokens / w.contextWindow) * 100;
+}
+
+/** Context in use: a percentage of the window ("0.4%", "27%"), or tokens when the window is unknown ("3.8k"). */
+export function fmtContext(w: Worker): string {
+	const pct = contextPercent(w);
+	if (pct === undefined) return fmtTokens(w.usage.contextTokens);
+	if (pct === 0) return "0%";
+	if (pct < 0.1) return "<0.1%";
+	if (pct < 10) return `${pct.toFixed(1).replace(/\.0$/, "")}%`;
+	return `${Math.round(pct)}%`;
+}
+
+/** At or above this share of the context window, the widget shows Ctx in the warning color. */
+export const CONTEXT_WARN_PERCENT = 80;
+
 export function fmtDuration(ms: number): string {
 	const s = Math.round(ms / 1000);
 	if (s < 60) return `${s}s`;
@@ -50,7 +69,9 @@ export function statsText(w: Worker): string {
 	const parts = [
 		`${w.turns} turns`,
 		`${w.toolCalls} tools${w.toolErrors ? ` (${w.toolErrors} failed)` : ""}`,
-		`ctx ${fmtTokens(w.usage.contextTokens)}`,
+		w.contextWindow
+			? `ctx ${fmtContext(w)} (${fmtTokens(w.usage.contextTokens)} of ${fmtTokens(w.contextWindow)})`
+			: `ctx ${fmtTokens(w.usage.contextTokens)}`,
 		`↑${fmtTokens(w.usage.input)} ↓${fmtTokens(w.usage.output)}`,
 		fmtCost(w.usage.cost),
 	];
@@ -107,7 +128,7 @@ export const STATUS_LEGEND = [
 	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped (idle ones revive on worker_send) · ↯ interrupted (pi quit)",
 	"  Turns   model calls (one per turn_start)",
 	"  Tools   tool calls; (n✗) = n returned an error",
-	"  Ctx     context size now = total tokens of the last model call",
+	"  Ctx     context used now: tokens of the last model call as % of the model's context window (tokens if unknown)",
 	"  ↑In     input tokens not served from cache",
 	"  ↓Out    output tokens, thinking included",
 	"  Cost    USD",
@@ -135,7 +156,7 @@ export function statusCells(w: Worker, nowMax = 60): string[] {
 		w.queued ? `${w.name} (+${w.queued} queued)` : w.name,
 		String(w.turns),
 		w.toolErrors ? `${w.toolCalls} (${w.toolErrors}✗)` : String(w.toolCalls),
-		fmtTokens(w.usage.contextTokens),
+		fmtContext(w),
 		fmtTokens(w.usage.input),
 		fmtTokens(w.usage.output),
 		fmtCost(w.usage.cost),

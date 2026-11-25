@@ -3,7 +3,17 @@
  */
 
 import { matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { healthNote, INTERRUPTED_HINT, oneLine, STATUS_ICON, STATUS_LABEL, statsText, statusCells } from "./format.ts";
+import {
+	CONTEXT_WARN_PERCENT,
+	contextPercent,
+	healthNote,
+	INTERRUPTED_HINT,
+	oneLine,
+	STATUS_ICON,
+	STATUS_LABEL,
+	statsText,
+	statusCells,
+} from "./format.ts";
 import type { TranscriptEntry, Worker, WorkerStatus } from "./worker.ts";
 
 // Loose structural types: keeps this file independent of exact pi type exports.
@@ -160,7 +170,12 @@ function widgetLayout(source: WorkerSource, width: number, theme: ThemeLike): Wi
 		const r = rows[k]!;
 		const st = theme.fg(STATUS_COLOR[w.status], cell(r[0]!, 0));
 		const name = theme.bold(cell(r[1]!, 1));
-		const stats = theme.fg("dim", r.slice(2).map((t, j) => cell(t, j + 2)).join("  "));
+		// Ctx (column 4) turns to the warning color when the context window is nearly full.
+		const full = (contextPercent(w) ?? 0) >= CONTEXT_WARN_PERCENT;
+		const stats = r
+			.slice(2)
+			.map((t, j) => theme.fg(full && j + 2 === 4 ? "warning" : "dim", cell(t, j + 2)))
+			.join(theme.fg("dim", "  "));
 		const head = ` ${st}  ${name}  ${stats}  `;
 		const room = Math.max(10, width - visibleWidth(head));
 		lines.push(truncateToWidth(head + preview(w, theme, room), width));

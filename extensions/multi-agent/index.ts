@@ -391,6 +391,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 			worker.toolCalls += w.toolCalls;
 			worker.toolErrors += w.toolErrors;
 			for (const k of ["input", "output", "cacheRead", "cacheWrite", "cost"] as const) worker.usage[k] += w.usage[k];
+			// Same session, so the same context until its next model call.
+			if (!worker.usage.contextTokens) worker.usage.contextTokens = w.usage.contextTokens;
 			worker.version++;
 			registry.emit("change");
 			return worker;

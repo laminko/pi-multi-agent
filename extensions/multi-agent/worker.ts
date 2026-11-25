@@ -243,6 +243,8 @@ export class Worker extends EventEmitter {
 	busy = false;
 	pid?: number;
 	model?: string;
+	/** Context window of the worker's model in tokens (from get_state); undefined if pi did not say. */
+	contextWindow?: number;
 	thinkingLevel?: string;
 	sessionFile?: string;
 	sessionId?: string;
@@ -406,6 +408,7 @@ export class Worker extends EventEmitter {
 		this.sessionFile = state?.sessionFile;
 		this.sessionId = state?.sessionId;
 		if (state?.model?.provider && state?.model?.id) this.model = `${state.model.provider}/${state.model.id}`;
+		if (typeof state?.model?.contextWindow === "number" && state.model.contextWindow > 0) this.contextWindow = state.model.contextWindow;
 		if (state?.thinkingLevel) this.thinkingLevel = state.thinkingLevel;
 		this.status = "idle";
 		this.activity = "ready";
