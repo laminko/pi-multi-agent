@@ -138,7 +138,7 @@ not). Results then arrive like any worker's.
 <worker name="beta" status="done">
 | St | Worker | Turns | Tools |  Ctx | ↑In | ↓Out |  Cost | Time | Now |
 |----|--------|------:|------:|-----:|----:|-----:|------:|-----:|-----|
-| ✓  | beta   |     1 |     0 | 4.1k |   2 | 1.3k | $0.03 |  12s |     |
+| ✓  | beta   |     1 |     0 | 0.4% |   2 | 1.3k | $0.03 |  12s |     |
 <result>
 …final assistant text of the task…
 </result>
@@ -177,8 +177,8 @@ The default status format, since v0.3.0. `worker_status`, the `worker_wait` prog
 ```
 | St | Worker   | Turns |   Tools | Ctx | ↑In | ↓Out |  Cost |   Time | Now               |
 |----|----------|------:|--------:|----:|----:|-----:|------:|-------:|-------------------|
-| ●  | worker-1 |    27 | 37 (2✗) | 99k |  56 |  22k | $1.55 | 15m27s | waiting for model |
-| ✓  | worker-2 |    27 | 33 (1✗) | 93k |  56 |  18k | $1.45 | 12m11s |                   |
+| ●  | worker-1 |    27 | 37 (2✗) | 50% |  56 |  22k | $1.55 | 15m27s | waiting for model |
+| ✓  | worker-2 |    27 | 33 (1✗) | 47% |  56 |  18k | $1.45 | 12m11s |                   |
 ```
 
 | Column | Meaning | Source |
@@ -187,7 +187,7 @@ The default status format, since v0.3.0. `worker_status`, the `worker_wait` prog
 | Worker | Name. `(+n queued)` = n steer or follow-up messages wait in the worker | `queue_update` |
 | Turns | Model calls, one per `turn_start` | `worker.ts`, `turns` |
 | Tools | Tool calls. `(n✗)` = n returned an error | `tool_execution_start` / `_end` |
-| Ctx | Context size now: the total tokens of the last model call | `usage.totalTokens` |
+| Ctx | Context used now: the total tokens of the last model call as a share of the model's context window, e.g. `0.4%`, `27%` (`<0.1%` below 0.1; one decimal below 10%). Shown in tokens (`4.1k`) when pi does not report the window. The widget draws it in the warning color from 80%. The viewer and `/workers` stats line show both: `ctx 27% (54k of 200k)` | `usage.totalTokens` / `get_state` `model.contextWindow` |
 | ↑In | Input tokens not served from cache, summed | `usage.input` |
 | ↓Out | Output tokens, thinking included, summed | `usage.output` |
 | Cost | USD, summed | `usage.cost.total` |

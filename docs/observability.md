@@ -30,8 +30,8 @@ Shown above the editor once the first worker starts. It is hidden while the `/wo
 ```
 ─ workers 0 running · 2 done  ·  /workers to watch live  ·  /workers-legend
  St  Worker            Turns  Tools   Ctx  ↑In  ↓Out     Cost  Time  Now
- ✓   alpha                 2      1  8.2k    4   140  $0.0018   19s  → Master — sleep finished. done …
- ✓   beta-long-name-x      2      1  8.4k    4   312  $0.0019   20s  → Master — ran the requested command chain…
+ ✓   alpha                 2      1  0.8%    4   140  $0.0018   19s  → Master — sleep finished. done …
+ ✓   beta-long-name-x      2      1  0.8%    4   312  $0.0019   20s  → Master — ran the requested command chain…
 ```
 
 The columns are the [status table](reference.md#status-table) columns. Type `/workers-legend` to see the legend
@@ -114,7 +114,7 @@ A finished worker's result reaches the manager as a `⚑ worker <name> <status>`
 ┌────┬───────────┬───────┬───────┬──────┬─────┬──────┬─────────┬──────┬─────┐
 │ St │ Worker    │ Turns │ Tools │ Ctx  │ ↑In │ ↓Out │ Cost    │ Time │ Now │
 ├────┼───────────┼───────┼───────┼──────┼─────┼──────┼─────────┼──────┼─────┤
-│ ✓  │ be-lesson │ 1     │ 0     │ 2.7k │ 2   │ 121  │ $0.0006 │ 2s   │     │
+│ ✓  │ be-lesson │ 1     │ 0     │ 0.3% │ 2   │ 121  │ $0.0006 │ 2s   │     │
 └────┴───────────┴───────┴───────┴──────┴─────┴──────┴─────────┴──────┴─────┘
 
  Summary

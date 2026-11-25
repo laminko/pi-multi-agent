@@ -19,6 +19,10 @@ Idle cleanup. Finished workers that nobody reuses no longer keep a pi process fo
   gave this task to "<name>" directly … This is a new result, not a duplicate`. Messages you send during a manager's
   task are mentioned too. TUI header: `⚑ worker <name> done · your task`. Found in V42: the manager called such
   results duplicates and offered to stop the workers.
+- **Ctx is a percentage** of the worker model's context window (`0.4%`, `27%`), in the widget, status tables and
+  worker blocks, so you see how full a worker's context is. The window comes from the worker's `get_state`; when pi
+  does not report it, Ctx stays in tokens. The viewer stats line shows both (`ctx 27% (54k of 200k)`); the widget
+  draws Ctx in the warning color from 80%. A revived worker keeps its last Ctx. `scripts/test-context.ts` (T17).
 - Widget: an idle-stopped row shows `idle · worker_send revives · → <result>`, and the summary `N stopped while idle`
   (found in manual TUI check B: the row showed only `→ <result>`, like a killed worker).
 

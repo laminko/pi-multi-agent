@@ -39,6 +39,7 @@ commands that run `scripts/…` or `./extensions/…` assume a clone of the repo
 | Test: health checks, with fake worker processes (no model calls) | `node scripts/test-health.ts` (T13) |
 | Test: the manager follows up on a stuck worker | `node scripts/test-health-live.ts` (T14) |
 | Test: idle cleanup, with fake worker processes (no model calls) | `node scripts/test-idle.ts` (T15) |
+| Test: Ctx percentage (no model calls) | `node scripts/test-context.ts` (T17) |
 | Test: idle cleanup with a real model | `node scripts/test-idle-live.ts <project>` (T16) |
 | Idle cleanup setting (set before starting pi) | `PI_MULTI_AGENT_IDLE_MINUTES=10` (min; `0` = off) |
 | Health check settings (set before starting pi) | `PI_MULTI_AGENT_HEALTH_INTERVAL=10` (s; `0` = off), `PI_MULTI_AGENT_STALL_SECONDS=180` |
@@ -353,6 +354,19 @@ code word and counts the test functions. The worker then stays unused.
 first pid is gone; the manager is asked to `worker_send` the same worker; the reply starts `It had been stopped for
 being idle; restarted on its own session…`; a new pid runs; the worker answers with the code word without reading
 files; `PASS`, `0 orphans`.
+
+### T17. Ctx as a percentage of the context window
+
+Free, 2 s. No model calls.
+
+```bash
+node scripts/test-context.ts
+```
+
+**Expected:** 16 `PASS` lines and `all passed`: formatting (`0%`, `<0.1%`, `0.4%`, `2.5%`, `10%`, `27%`, `100%`,
+tokens when the window is unknown); the status table, the legend, the stats line (`ctx 27% (54k of 200k)`) and the
+widget lines; the warning color from 80% and dim below; a fake worker process whose `get_state` reports a 200k
+window ends a task at `27%`.
 
 ## Operating a session
 
