@@ -279,6 +279,26 @@ Why a verdict, not an automatic fix: a quiet worker may be in a legitimately lon
 only an LLM that reads the activity can tell. The extension only notices; the manager decides, using the advice in
 the alert (abort a hung tool call, since steering waits for the current step; kill a process that does not answer).
 
+## Idle cleanup
+
+A finished worker stays alive so `worker_send` can reuse it with its context. Left alone, each idle worker holds a pi
+process. Since v0.9.0, `idle.ts` decides and `index.ts` acts:
+
+- **Timer.** `session_start` starts a `setInterval` of about a tenth of `PI_MULTI_AGENT_IDLE_MINUTES` (default 10
+  min; the tick is clamped to 1–30 s, unref'd, cleared in `session_shutdown`). `0` / `off` starts no timer.
+- **Rule** (`shouldReap`, pure). Idle since `taskFinishedAt` (or `createdAt` if it never had a task) for at least
+  the idle time, and alive, not busy, not starting or stopping, no queued messages, no open dialog, no
+  `worker_wait` on it, not being resumed.
+- **Acting.** `Worker.stop()` (stdin end → SIGTERM → SIGKILL), then `idleStoppedAfterMs` marks the worker. It stays in
+  the registry as `stopped`, with its result, log, session file and the hint `stopped while idle · worker_send
+  revives it with its context`. You get an info toast; the manager LLM gets no message (nothing for it to do).
+  The stop is recorded like any state change, so a quit afterwards does not offer it for resume.
+- **Revive.** `worker_send`, `/worker-send` and the viewer's `m` key start a new process on the old session file
+  (`--session`, same path as `worker_resume`), with the old model, thinking, tools, role, cwd and notify. The viewer
+  history and the life-time counters carry over. A send that races with a stop in progress waits for it first. A
+  worker killed on purpose (`worker_stop` kill, `/worker-stop … kill`, viewer `k`) clears the mark and is not
+  revived.
+
 ## Design decisions
 
 | Decision | Why | Alternative considered |

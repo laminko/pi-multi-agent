@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.0 — 2026-11-25
+
+Idle cleanup. Finished workers that nobody reuses no longer keep a pi process for the rest of the session.
+
+### Added
+
+- A worker that finished and was not reused for `PI_MULTI_AGENT_IDLE_MINUTES` (default 10; `0` or `off` = never)
+  has its process stopped. Never while it is busy, starting, has queued messages or an open dialog, or is waited on.
+- It stays listed as `○ stopped` with `stopped while idle · worker_send revives it with its context`; its result,
+  log and session stay. Info toast for you; no message to the manager LLM.
+- `worker_send`, `/worker-send` and the viewer's `m` key revive it on its own session file (same model, thinking,
+  tools, role, cwd), so it keeps its context. Counters and viewer history carry over. Killed workers are not revived.
+- `worker_status` shows the idle setting. `idle.ts`; `scripts/test-idle.ts` (Runbook T15, 21 checks, no model calls);
+  `scripts/test-idle-live.ts` (T16, real model).
+- Tool result `details.workers[]` include the worker's `pid`.
+
 ## 0.8.0 — 2026-11-25
 
 Health checks. The manager notices stuck workers and follows up on them by itself.

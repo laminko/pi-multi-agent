@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { detailReport, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
+import { detailReport, fmtDuration, oneLine, STATUS_LABEL, STATUS_LEGEND, statusTable } from "./format.ts";
 import {
 	assessHealth,
 	describeHealthConfig,
@@ -31,6 +31,7 @@ import {
 	readHealthConfig,
 	updateHealth,
 } from "./health.ts";
+import { describeIdleConfig, idleSince, readIdleConfig, shouldReap } from "./idle.ts";
 import { formatResultBlock, formatRunningBlock, renderReport } from "./report.ts";
 import {
 	INTERRUPTED_NOTE,
@@ -90,6 +91,7 @@ function snapshot(w: Worker) {
 		name: w.name,
 		status: w.status,
 		busy: w.busy,
+		pid: w.pid,
 		turns: w.turns,
 		toolCalls: w.toolCalls,
 		cost: w.usage.cost,
@@ -146,6 +148,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 	/** Health checks (health.ts): PI_MULTI_AGENT_HEALTH_INTERVAL (default 10 s), PI_MULTI_AGENT_STALL_SECONDS (180 s). */
 	const healthConfig = readHealthConfig();
 	let healthTimer: ReturnType<typeof setInterval> | undefined;
+	/** Idle cleanup (idle.ts): PI_MULTI_AGENT_IDLE_MINUTES (default 10; 0 = off). */
+	const idleConfig = readIdleConfig();
+	let idleTimer: ReturnType<typeof setInterval> | undefined;
 
 	// ------------------------------------------------------------ UI plumbing
 
@@ -330,6 +335,74 @@ export default function multiAgent(pi: ExtensionAPI) {
 		} catch {
 			/* session gone */
 		}
+	}
+
+	// ------------------------------------------------------------ idle cleanup (see idle.ts)
+
+	/** Stop the processes of workers that were not reused for idleConfig.idleMs. They stay listed and can be revived. */
+	async function reapIdle(): Promise<void> {
+		if (shuttingDown) return;
+		const now = Date.now();
+		const targets = registry
+			.list()
+			.filter((w) => !resuming.has(w.name) && shouldReap(w, now, idleConfig, (waiting.get(w.name) ?? 0) > 0));
+		await Promise.all(
+			targets.map(async (w) => {
+				const idleMs = now - idleSince(w);
+				w.idleStoppedAfterMs = idleMs;
+				await w.stop().catch(() => undefined);
+				if (shuttingDown) return;
+				w.activity = `stopped after ${fmtDuration(idleMs)} idle · worker_send revives it`;
+				w.transcript.push({
+					kind: "info",
+					text: `Idle cleanup: process stopped after ${fmtDuration(idleMs)} without a task. worker_send starts it again on its session (${w.sessionFile ?? "no session file: fresh context"}).`,
+					time: Date.now(),
+				});
+				w.version++;
+				registry.emit("change");
+				toast(`Worker ${w.name} stopped after ${fmtDuration(idleMs)} idle`, "info");
+			}),
+		);
+	}
+
+	/** True for a worker whose process the idle cleanup stopped: worker_send starts it again. */
+	const revivable = (w: Worker) => w.status === "stopped" && w.idleStoppedAfterMs !== undefined && !w.alive;
+
+	/** Start an idle-stopped worker again on its own session file, with its old settings. */
+	async function revive(ctx: ExtensionContext, w: Worker): Promise<Worker> {
+		const c = w.config;
+		const session = w.sessionFile && fs.existsSync(w.sessionFile) ? w.sessionFile : undefined;
+		resuming.add(w.name);
+		try {
+			const worker = await spawnWorker(ctx, {
+				name: w.name,
+				cwd: c.cwd,
+				model: w.model ?? c.model,
+				thinking: w.thinkingLevel ?? c.thinking,
+				tools: c.tools,
+				role: c.role,
+				notify: c.notify,
+				resumeSession: session,
+			});
+			// Keep the viewer history and the life-time counters of the old process.
+			worker.transcript = [...w.transcript, ...worker.transcript].slice(-400);
+			worker.tasks += w.tasks;
+			worker.turns += w.turns;
+			worker.toolCalls += w.toolCalls;
+			worker.toolErrors += w.toolErrors;
+			for (const k of ["input", "output", "cacheRead", "cacheWrite", "cost"] as const) worker.usage[k] += w.usage[k];
+			worker.version++;
+			registry.emit("change");
+			return worker;
+		} finally {
+			resuming.delete(w.name);
+		}
+	}
+
+	/** worker_send / viewer / command: wait for a stop in progress by the idle cleanup, then revive if needed. */
+	async function ensureLive(ctx: ExtensionContext, w: Worker): Promise<Worker> {
+		for (let i = 0; i < 150 && w.idleStoppedAfterMs !== undefined && w.alive && w.stopping; i++) await abortableSleep(100);
+		return revivable(w) ? revive(ctx, w) : w;
 	}
 
 	function register(worker: Worker): void {
@@ -523,7 +596,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 		}
 		const live = registry.list().filter((w) => w.alive).length;
 		if (live >= MAX_LIVE_WORKERS) {
-			throw new Error(`Too many live workers (${live}/${MAX_LIVE_WORKERS}). Kill finished workers with worker_stop first.`);
+			throw new Error(
+				`Too many live workers (${live}/${MAX_LIVE_WORKERS}). Kill finished workers with worker_stop first (idle ones are stopped automatically after a while).`,
+			);
 		}
 		const cwd = params.cwd ? path.resolve(ctx.cwd, params.cwd) : ctx.cwd;
 		if (!fs.existsSync(cwd)) throw new Error(`Worker cwd does not exist: ${cwd}`);
@@ -828,7 +903,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 		label: "Message Worker",
 		description:
 			"Send a message to an existing worker. If the worker is idle it starts working on the message as a new task (it remembers its previous work). " +
-			"If it is busy: mode 'steer' redirects it after its current step, mode 'followUp' queues the message until it finishes.",
+			"If it is busy: mode 'steer' redirects it after its current step, mode 'followUp' queues the message until it finishes. " +
+			"A worker stopped for being idle is started again on its own session first, so it keeps its context.",
 		promptSnippet: "Steer a running worker or give an existing worker more work",
 		promptGuidelines: [
 			"Use worker_send to give follow-up work to an existing worker that already has relevant context, instead of spawning a new worker.",
@@ -846,11 +922,19 @@ export default function multiAgent(pi: ExtensionAPI) {
 		renderResult: renderResultText,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			uiCtx = ctx;
-			const worker = getWorker(params.name);
+			let worker = getWorker(params.name);
 			if (worker.status === "interrupted") {
 				throw new Error(
 					`Worker "${worker.name}" was interrupted when pi quit; call worker_resume to continue it with its context, then send.`,
 				);
+			}
+			let revived = "";
+			if (worker.idleStoppedAfterMs !== undefined && (revivable(worker) || worker.stopping)) {
+				const hadSession = !!worker.sessionFile && fs.existsSync(worker.sessionFile);
+				worker = await ensureLive(ctx, worker);
+				revived = hadSession
+					? "It had been stopped for being idle; restarted on its own session, so it keeps its context. "
+					: "It had been stopped for being idle and had no session file; restarted with a fresh context. ";
 			}
 			if (!worker.alive) throw new Error(`Worker "${worker.name}" is ${STATUS_LABEL[worker.status]}; spawn a new one.`);
 			const mode = params.mode ?? "followUp";
@@ -858,14 +942,17 @@ export default function multiAgent(pi: ExtensionAPI) {
 			if (params.wait) {
 				const timeoutMs = (params.timeoutSeconds ?? DEFAULT_WAIT_SECONDS) * 1000;
 				const outcome = await waitForWorkers([worker], timeoutMs, signal, ctx, progressUpdater(onUpdate, [worker]));
-				return buildResults([worker], outcome);
+				const res = buildResults([worker], outcome);
+				if (revived) res.content[0]!.text = `${revived.trim()}\n\n${res.content[0]!.text}`;
+				return res;
 			}
 			const what =
-				disposition === "started"
+				revived +
+				(disposition === "started"
 					? `Worker "${worker.name}" started working on the message.`
 					: disposition === "queued"
 						? `Message queued for worker "${worker.name}" (${mode}).`
-						: `The message was handled by an extension command in worker "${worker.name}".`;
+						: `The message was handled by an extension command in worker "${worker.name}".`);
 			return { content: [{ type: "text", text: what }], details: { outcome: disposition, workers: [snapshot(worker)] } };
 		},
 	});
@@ -887,7 +974,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 			uiCtx = ctx;
 			const targets = params.names?.length
 				? params.names.map(getWorker)
-				: registry.list().filter((w) => working(w) || (!w.reported && w.tasks > 0 && !w.stopping));
+				: registry
+						.list()
+						.filter((w) => working(w) || (!w.reported && w.tasks > 0 && (!w.stopping || revivable(w))));
 			if (targets.length === 0) {
 				const all = registry.list();
 				const text = all.length
@@ -922,7 +1011,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			}
 			const all = registry.list();
 			const text = all.length
-				? `${statusTable(all)}\n\nlogs: ${runDir ?? "(none yet)"}\n${describeHealthConfig(healthConfig)}`
+				? `${statusTable(all)}\n\nlogs: ${runDir ?? "(none yet)"}\n${describeHealthConfig(healthConfig)}\n${describeIdleConfig(idleConfig)}`
 				: "No workers.";
 			return { content: [{ type: "text", text }], details: { workers: all.map(snapshot) } };
 		},
@@ -956,6 +1045,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 								: `${w.name}: not running (interrupted); worker_resume continues it`,
 						);
 					} else if (mode === "kill") {
+						w.idleStoppedAfterMs = undefined; // killed on purpose: not revived by worker_send
 						await w.stop();
 						lines.push(`${w.name}: killed`);
 					} else if (w.busy) {
@@ -1030,10 +1120,11 @@ export default function multiAgent(pi: ExtensionAPI) {
 				);
 				if (!action || action.action === "close") return;
 				current = action.name;
-				const w = registry.workers.get(action.name);
+				let w = registry.workers.get(action.name);
 				if (!w) continue;
 				try {
 					if (action.action === "message") {
+						w = await ensureLive(ctx, w);
 						if (!w.alive) {
 							ctx.ui.notify(`Worker ${w.name} is ${STATUS_LABEL[w.status]}.`, "warning");
 							continue;
@@ -1048,6 +1139,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 					} else if (action.action === "kill") {
 						if (w.alive && (await ctx.ui.confirm(`Kill worker ${w.name}?`, "The worker process will be terminated."))) {
 							w.reported = true;
+							w.idleStoppedAfterMs = undefined;
 							await w.stop();
 						}
 					}
@@ -1078,7 +1170,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 			const match = args.trim().match(/^(\S+)\s+([\s\S]+)$/);
 			if (!match) return ctx.ui.notify("Usage: /worker-send <name> <message>", "warning");
 			try {
-				const w = getWorker(match[1]!);
+				let w = getWorker(match[1]!);
+				w = await ensureLive(ctx, w);
 				const disposition = await w.send(match[2]!.trim(), "steer");
 				ctx.ui.notify(`${w.name}: ${disposition === "started" ? "started new task" : `message ${disposition}`}`, "info");
 			} catch (error) {
@@ -1101,6 +1194,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 						if (mode === "kill") dismiss(w);
 					} else if (mode === "kill") {
 						w.reported = true;
+						w.idleStoppedAfterMs = undefined;
 						await w.stop();
 					} else await w.abort();
 				}
@@ -1176,6 +1270,11 @@ export default function multiAgent(pi: ExtensionAPI) {
 			healthTimer = setInterval(() => void checkHealth().catch(() => undefined), healthConfig.intervalMs);
 			healthTimer.unref?.();
 		}
+		if (!idleTimer && idleConfig.intervalMs > 0) {
+			// Stop worker processes nobody reused for PI_MULTI_AGENT_IDLE_MINUTES (idle.ts).
+			idleTimer = setInterval(() => void reapIdle().catch(() => undefined), idleConfig.intervalMs);
+			idleTimer.unref?.();
+		}
 		refreshWidget();
 	});
 
@@ -1187,6 +1286,8 @@ export default function multiAgent(pi: ExtensionAPI) {
 		ticker = undefined;
 		if (healthTimer) clearInterval(healthTimer);
 		healthTimer = undefined;
+		if (idleTimer) clearInterval(idleTimer);
+		idleTimer = undefined;
 		if (renderTimer) clearTimeout(renderTimer);
 		renderTimer = undefined;
 		const workers = registry.list();

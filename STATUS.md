@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.8.0 |
+| **Version** | 0.9.0 |
 | **State** | 🟢 Working prototype. The core flows are verified end-to-end by hand. There is no automated test suite yet |
 | **Last updated** | 2026-11-25 |
 | **Tested on** | macOS (Darwin 27.2), pi 1.6.0, Node v26.2.0, tmux 3.8; models `claude-code/default`, `claude-code/claude-haiku-5-5`; real-project test: Python 3.15, SQLite 3.54 |
@@ -19,6 +19,7 @@
 | Mouse (fullscreen) | ✅ Done · verified | Widget row click, viewer tab click, wheel, help-line actions (V22, V23) |
 | Resume after quit | ✅ Done · verified | Records, `↯ interrupted` restore, `/workers-resume`, `worker_resume`, session repair, worker sessions in their own dir (V28–V34) |
 | Health checks (stuck workers) | ✅ Done · verified | Every 10 s while workers run: heartbeat + quiet / not answering / loop verdicts, toast, `⚠` warning, alert to the manager LLM, `worker_wait` ends `stalled` (V36–V39) |
+| Idle cleanup | ✅ Done · tested without a model | Idle worker processes stop after `PI_MULTI_AGENT_IDLE_MINUTES` (10); `worker_send` revives them on their session (V40). Live with a real model: V41. Not yet seen in the TUI |
 | Result rendering (TUI) | ✅ Done · verified | Worker blocks in tool rows and `⚑` messages: drawn table, Markdown result, no tags (V26, V27) |
 | Status table + legend | ✅ Done · verified | Default format for `worker_status`, wait progress, result blocks, `/workers-legend` (V19, V20) |
 | `/workers` viewer | ✅ Done · verified | Rendering, scrolling, switching, `m` message, tab window for many workers (V24, V25). The `a`/`k` keys were not exercised |
@@ -73,10 +74,13 @@ All runs were on 2026-11-24. Procedures for repeating them are in the [Runbook](
 | V37 | The manager follows up by itself | `scripts/test-health-live.ts` (T14), `claude-code/claude-haiku-5-5`, interval 2 s, stall 15 s, worker in `sleep 120` | ✅ Toast and alert 15 s after the worker went silent; the manager started a turn on its own, called `worker_status sleeper`, judged the sleep legitimate, left it running and told the user. 0 orphans. With `claude-local/claude-haiku-4-5` the test cannot run: that model wrote its tool call as text, so the worker never slept |
 | V38 | Regression | T1 (`--no-extensions -e`), T10, T11, T12 | ✅ 6 commands; 21/21; 24/24; 10/10 |
 | V39 | Health checks in the interactive TUI | tmux 160×50, fullscreen, haiku, interval 2 s, stall 15 s, worker in `sleep 120` | ✅ Widget: `1 may be stuck` and `⚠ quiet 21s ⟳ bash $ sleep 120`; alert message: `⚠ worker sleeper may be stuck (quiet)`, detail line, drawn table, settings, advice; the manager called `worker_status` and left it running. Repeat alert at ~78 s of quiet: the manager checked again and left it. Result at 2m03s; the `⚠` and the summary count cleared. 0 orphans. The repeat alert's `still stuck` header was not seen on screen (checked by T13) |
+| V40 | Idle cleanup | `scripts/test-idle.ts` (T15), fake RPC workers, idle time 2 s; T1, T10–T13 re-run | ✅ 21 of 21: idle process stopped, reused one kept, listed with hint, toast, no manager message, revived on its session with counters, killed not revived, 0 orphans. T1 6 commands; T10–T13 all pass |
+| V41 | Idle cleanup, live | `scripts/test-idle-live.ts` (T16) in `todo-sqlite`, `claude-code/claude-haiku-5-5`, idle 30 s | ✅ Worker done at 8 s, auto-reported; toast `stopped after 32s idle` at 39.7 s, pid gone; `worker_send` revived it (new pid, same session file per its log), answer had the random code word without reading files; 0 orphans. First run passed on behavior but its pid lookup was wrong; `details.workers[].pid` added for that. (Haiku's test count was off: 57 vs 51 real; not related) |
 | V25 | Many workers, live TUI | tmux 150×45, haiku, `PI_MULTI_AGENT_MAX_WORKERS=12`, 10 workers running `sleep 90` | ✅ 8 rows + `… 2 more (2 running)`; click on that line → viewer on `lesson-worker-9` with `‹ 4 … 1 ›`; 8×`←` → `worker 1/10`; `←` wraps to `worker 10/10`, tab visible; T1 still passes; 0 orphans |
 
 ## Not yet verified
 
+- Idle cleanup: the viewer `m` and `/worker-send` revive paths; seen in the TUI.
 - Dialog forwarding (`select`/`confirm`/`input`/`editor`) from extensions running inside workers.
 - `worker_send` with `steer` / `followUp` while a worker is busy (RPC `steer` / `follow_up`).
 - `worker_stop` called by the manager LLM; `/worker-send`, `/worker-stop`, `/workers-clear`; viewer keys `a` and `k`.

@@ -43,6 +43,9 @@ You don't need to watch for stuck workers. The manager checks running workers ev
 stops answering or loops, you see `⚠` in the widget and the manager follows up on it by itself.
 `PI_MULTI_AGENT_HEALTH_INTERVAL` changes the interval.
 
+Idle workers clean up after themselves: a finished worker that is not reused for 10 minutes
+(`PI_MULTI_AGENT_IDLE_MINUTES`) has its process stopped. `worker_send` starts it again with its context.
+
 ## If pi quits
 
 Reopen with `pi -c` and type `/workers-resume`. Interrupted workers continue where they stopped.
