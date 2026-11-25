@@ -139,6 +139,16 @@ PI_MULTI_AGENT_STALL_SECONDS=600 pi       # call a worker quiet only after 10 mi
 
 See [Observability](observability.md#stuck-workers-health-checks) for what the warnings mean.
 
+## Idle workers
+
+A finished worker stays alive, so the manager can give it more work with `worker_send` and it remembers what it did.
+If nobody reuses it for 10 minutes, its process is stopped to free memory. It stays in the list as `○ stopped` with
+`stopped while idle`; a later `worker_send` starts it again on its own session, so it still has its context.
+
+```bash
+PI_MULTI_AGENT_IDLE_MINUTES=30 pi   # keep idle workers for 30 min (0 or off: until the session ends)
+```
+
 ## Controlling cost
 
 - Every worker has its own context and usage. The widget, `/workers` and `worker_status` show cost per worker.

@@ -294,6 +294,8 @@ export class Worker extends EventEmitter {
 	private stderrLog?: fs.WriteStream;
 	/** True once stop() was called (process is being shut down on purpose). */
 	stopping = false;
+	/** Set when the idle cleanup stopped this worker (idle.ts): how long it had been idle. worker_send revives it. */
+	idleStoppedAfterMs?: number;
 	private exited = false;
 	private exitPromise?: Promise<void>;
 	private spawnError?: Error;

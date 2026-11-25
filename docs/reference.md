@@ -304,6 +304,24 @@ away as soon as the worker sends an event, before the next check. Health state r
 `PI_MULTI_AGENT_HEALTH_INTERVAL=0` (or `off`) turns the checks off; `PI_MULTI_AGENT_STALL_SECONDS=0` turns only the
 quiet verdict off.
 
+## Idle cleanup
+
+Since v0.9.0, a worker that finished and was not reused for `PI_MULTI_AGENT_IDLE_MINUTES` minutes (default **10**) has
+its process stopped (`idle.ts`). Checked about 10 times per idle period (every 1–30 s).
+
+- Never while the worker is busy, starting, has queued messages or an open dialog, or a `worker_wait` waits on it.
+  Idle time counts from the end of its last task (or its start, if it never had one).
+- The worker stays listed as `○ stopped` with the hint `stopped while idle · worker_send revives it with its
+  context`. Its result, log and session file stay. You get an info toast `Worker <name> stopped after 10m00s idle`;
+  the manager LLM gets no message. It no longer counts toward `PI_MULTI_AGENT_MAX_WORKERS`.
+- `worker_send` (and `/worker-send`, viewer `m`) starts it again on its own session file, so it keeps its context;
+  the reply starts with `It had been stopped for being idle; restarted on its own session…`. Counters and viewer
+  history carry over.
+- A worker killed on purpose (`worker_stop` mode `kill`, `/worker-stop <name> kill`, viewer `k`) is not revived.
+- `worker_status` shows the setting: `idle cleanup: worker processes stop after 10m00s without a task…`.
+
+`PI_MULTI_AGENT_IDLE_MINUTES=0` (or `off`) keeps idle workers alive until the session ends.
+
 ## Files
 
 ### Run directory
@@ -393,6 +411,7 @@ These are read when the manager loads the extension.
 | `PI_MULTI_AGENT_WORKER_SESSION_DIR` | `<multi-agent dir>/sessions` | Where new workers store their sessions |
 | `PI_MULTI_AGENT_WORKER_ARGS` | none | Extra CLI args for every worker, split on whitespace (no quoting). E.g. `--no-session`, `--session-dir /path`, `--no-extensions` |
 | `PI_MULTI_AGENT_HEALTH_INTERVAL` | `10` | Seconds between [health checks](#health-checks) of busy workers. Fractions allowed; below 1 becomes 1. `0` or `off` turns health checks off. Invalid values use the default |
+| `PI_MULTI_AGENT_IDLE_MINUTES` | `10` | Minutes a finished worker may stay unused before its process is stopped ([idle cleanup](#idle-cleanup)). Fractions allowed. `0` or `off`: never. Invalid values use the default |
 | `PI_MULTI_AGENT_STALL_SECONDS` | `180` | Seconds without any event before a busy worker counts as `quiet` and the manager is alerted. `0` or `off` turns only this verdict off |
 
 Set by the extension on worker processes:
@@ -414,6 +433,7 @@ Set by the extension on worker processes:
 | Health check heartbeat (`get_state`) reply | `min(5 s, interval)`; 3 unanswered in a row = `unresponsive` |
 | Quiet after | 180 s without events (`PI_MULTI_AGENT_STALL_SECONDS`) |
 | Loop | 5 identical tool calls in a row |
+| Idle worker process stopped after | 10 min without a task (`PI_MULTI_AGENT_IDLE_MINUTES`) |
 | Repeat alerts | when the problem has lasted about twice as long; at least the stall time and 60 s apart |
 | Default `worker_wait` / `wait: true` timeout | 1800 s |
 | Tool result size | 40 KB (shared across reported workers, ≥ 2 KB each) |

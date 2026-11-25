@@ -43,6 +43,9 @@ export const STATUS_LABEL: Record<WorkerStatus, string> = {
 /** Shown for interrupted workers (widget, status table, viewer). */
 export const INTERRUPTED_HINT = "pi quit while it worked · /workers-resume";
 
+/** Shown for workers stopped by the idle cleanup (idle.ts). */
+export const IDLE_STOPPED_HINT = "stopped while idle · worker_send revives it with its context";
+
 export function statsText(w: Worker): string {
 	const parts = [
 		`${w.turns} turns`,
@@ -101,7 +104,7 @@ export function statusLine(w: Worker): string {
  */
 export const STATUS_LEGEND = [
 	"Legend:",
-	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped · ↯ interrupted (pi quit)",
+	"  St      ● running · ✓ done · ◌ starting · ■ aborted · ✗ error/crashed · ○ stopped (idle ones revive on worker_send) · ↯ interrupted (pi quit)",
 	"  Turns   model calls (one per turn_start)",
 	"  Tools   tool calls; (n✗) = n returned an error",
 	"  Ctx     context size now = total tokens of the last model call",
@@ -121,6 +124,7 @@ function nowText(w: Worker, max: number): string {
 	if (w.busy) return busyText(w, max);
 	if (w.status === "error" || w.status === "crashed") return oneLine(w.errorMessage ?? w.activity, max);
 	if (w.status === "interrupted") return oneLine(INTERRUPTED_HINT, max);
+	if (w.status === "stopped" && w.idleStoppedAfterMs !== undefined) return oneLine(IDLE_STOPPED_HINT, max);
 	return "";
 }
 

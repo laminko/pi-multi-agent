@@ -38,6 +38,9 @@ commands that run `scripts/…` or `./extensions/…` assume a clone of the repo
 | Test: resume records and session repair (no model calls) | `node scripts/test-resume.ts` (T12) |
 | Test: health checks, with fake worker processes (no model calls) | `node scripts/test-health.ts` (T13) |
 | Test: the manager follows up on a stuck worker | `node scripts/test-health-live.ts` (T14) |
+| Test: idle cleanup, with fake worker processes (no model calls) | `node scripts/test-idle.ts` (T15) |
+| Test: idle cleanup with a real model | `node scripts/test-idle-live.ts <project>` (T16) |
+| Idle cleanup setting (set before starting pi) | `PI_MULTI_AGENT_IDLE_MINUTES=10` (min; `0` = off) |
 | Health check settings (set before starting pi) | `PI_MULTI_AGENT_HEALTH_INTERVAL=10` (s; `0` = off), `PI_MULTI_AGENT_STALL_SECONDS=180` |
 | **pi quit while workers ran** | `pi -c`, then `/workers-resume` ([details](#recovering-after-pi-quits)) |
 
@@ -319,6 +322,37 @@ for 16s; now: bash $ sleep 120; its process still answers status checks` and the
 manager starts a turn by itself, calls `worker_status` (or `worker_stop` / `worker_send`) and reports what it found;
 `PASS`. A model that refuses the pointless `sleep` or writes its tool call as text (seen with
 `claude-local/claude-haiku-4-5`) finishes in seconds and fails the test; use another model.
+
+### T15. Idle cleanup
+
+Free, 10 s. No model calls: the script also plays the worker, which answers every task at once.
+
+```bash
+node scripts/test-idle.ts
+```
+
+**Expected:** 21 `PASS` lines and `all passed`: settings (default 10 min / 30 s tick, `0`/`off`, fractions, junk);
+the reap rule (idle time, busy, waited on, dialog, never had a task, off). Then the extension with a 2 s idle time: an
+idle worker's process stops while a reused one stays alive; the stopped one stays listed with the hint and the
+setting; an info toast and no manager message; `worker_send` revives it on its own session file with counters and
+history; a killed worker is not revived; no process is left after shutdown.
+
+### T16. Idle cleanup, live
+
+About $0.01 with haiku, 50 s. Run it in a project that has `tests/test_todo.py` (e.g. the `todo-sqlite` scratch project).
+
+```bash
+cd ~/LLM_playground/todo-sqlite
+TEST_EXTENSIONS=~/.pi/agent/git/github.com/earendil-works/pi-claude-code node ~/LLM_playground/pi-multi-agent/scripts/test-idle-live.ts .
+```
+
+The manager runs with `PI_MULTI_AGENT_IDLE_MINUTES=0.5`. It spawns a read-only worker `counter` that gets a random
+code word and counts the test functions. The worker then stays unused.
+
+**Expected:** the result is auto-reported; about 30 s later a toast `Worker counter stopped after 32s idle` and the
+first pid is gone; the manager is asked to `worker_send` the same worker; the reply starts `It had been stopped for
+being idle; restarted on its own session…`; a new pid runs; the worker answers with the code word without reading
+files; `PASS`, `0 orphans`.
 
 ## Operating a session
 
