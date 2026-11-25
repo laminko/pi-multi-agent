@@ -41,6 +41,31 @@ export function formatResultBlock(w: Worker, maxBytes: number): string {
 	return lines.join("\n");
 }
 
+/**
+ * For the manager LLM: a note when you, not the manager, started the worker's current task or messaged it during the
+ * task (viewer `m`, /worker-send). Without it the manager takes the result for a duplicate of an earlier one.
+ * Empty when the manager alone directed the task.
+ */
+export function userOriginNote(w: Worker): string {
+	const quote = (t: string) => JSON.stringify(t.length > 300 ? `${t.slice(0, 299)}…` : t);
+	if (w.taskBy === "user") {
+		const more = w.userMessages.slice(1);
+		return (
+			`Note: the user gave this task to "${w.name}" directly (/worker-send or the /workers viewer), not you: ` +
+			`${quote(w.userMessages[0] ?? "")}.` +
+			(more.length ? ` The user also sent it: ${more.map(quote).join(", ")}.` : "") +
+			" This is a new result, not a duplicate. Report it to the user briefly; there is nothing to fix."
+		);
+	}
+	if (w.userMessages.length) {
+		return (
+			`Note: while "${w.name}" worked on your task, the user also messaged it directly: ${w.userMessages.map(quote).join(", ")}. ` +
+			"The result may reflect those messages."
+		);
+	}
+	return "";
+}
+
 /** Block for a worker that is still running (wait timed out or was interrupted). */
 export function formatRunningBlock(w: Worker): string {
 	return `<worker name="${w.name}" status="running">\n${statusTable([w], { legend: false })}\n${BLOCK_END}`;

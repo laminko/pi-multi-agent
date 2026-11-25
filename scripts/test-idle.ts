@@ -116,9 +116,10 @@ async function main(): Promise<void> {
 	const sent: any[] = [];
 	const toasts: { message: string; level: string }[] = [];
 	let lastWidget: string[] | undefined;
+	const commands = new Map<string, any>();
 	multiAgent({
 		registerTool: (tool: any) => tools.set(tool.name, tool),
-		registerCommand() {},
+		registerCommand: (name: string, c: any) => commands.set(name, c),
 		registerMessageRenderer() {},
 		on: (event: string, h: any) => handlers.set(event, h),
 		sendMessage: (message: any) => sent.push(message),
@@ -184,6 +185,19 @@ async function main(): Promise<void> {
 	check("worker_send revives it on its own session (context kept)", text0(r3).includes("ok 1 (resumed session)") && text0(r3).includes("keeps its context"), text0(r3));
 	const detail = text0(await call("worker_status", { name: "helper" }));
 	check("revived: counters and history carry over", /tasks: 2/.test(detail) && detail.includes("Idle cleanup: process stopped"), detail);
+
+	// You message the worker yourself: its result reaches the manager marked as your task, not as a duplicate.
+	const before = sent.length;
+	await commands.get("worker-send").handler("helper what did you say?", ctx);
+	await until(() => sent.length > before, 5000);
+	const mine = sent[before];
+	check(
+		"/worker-send task: the auto-report tells the manager the user gave it (no 'duplicate' confusion)",
+		!!mine && mine.details?.by === "user" && String(mine.content).includes("the user gave this task") && String(mine.content).includes('"what did you say?"'),
+		JSON.stringify(mine),
+	);
+	const r5 = await call("worker_send", { name: "helper", message: "and now?", wait: true, timeoutSeconds: 10 });
+	check("the manager's next task has no user note", !text0(r5).includes("the user gave"), text0(r5));
 
 	await call("worker_stop", { name: "helper", mode: "kill" });
 	const r4 = await call("worker_send", { name: "helper", message: "third" }).then(text0, (e: Error) => e.message);

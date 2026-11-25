@@ -266,6 +266,13 @@ export class Worker extends EventEmitter {
 	errorMessage?: string;
 	lastStopReason?: string;
 	stderrTail = "";
+	/**
+	 * Who started the current task: the manager LLM (worker_spawn / worker_send / resume) or you directly (viewer `m`,
+	 * /worker-send). Reports to the manager say so, so it does not take your task's result for a duplicate.
+	 */
+	taskBy: "manager" | "user" = "manager";
+	/** Messages you sent directly while the current task ran (steers / follow-ups), for the same reason. */
+	userMessages: string[] = [];
 	/** True once the current task's result was handed to the manager (suppresses auto-notify). */
 	reported = false;
 	transcript: TranscriptEntry[] = [];
@@ -459,8 +466,10 @@ export class Worker extends EventEmitter {
 	}
 
 	/** Start a new task (worker must be idle). */
-	async prompt(text: string, label = "TASK"): Promise<void> {
+	async prompt(text: string, label = "TASK", by: "manager" | "user" = "manager"): Promise<void> {
 		if (this.busy) throw new Error(`worker "${this.name}" is busy; steer or follow up instead`);
+		this.taskBy = by;
+		this.userMessages = by === "user" ? [text] : [];
 		this.busy = true;
 		this.status = "running";
 		this.activity = "waiting for model";
@@ -504,11 +513,12 @@ export class Worker extends EventEmitter {
 	}
 
 	/** Message the worker: new task when idle, otherwise steer or queue a follow-up. */
-	async send(text: string, mode: "steer" | "followUp"): Promise<"started" | "queued" | "handled"> {
+	async send(text: string, mode: "steer" | "followUp", by: "manager" | "user" = "manager"): Promise<"started" | "queued" | "handled"> {
 		if (!this.busy) {
-			await this.prompt(text, "MESSAGE");
+			await this.prompt(text, "MESSAGE", by);
 			return "started";
 		}
+		if (by === "user") this.userMessages.push(text);
 		this.reported = false;
 		this.addEntry("message", `[${mode}] ${text}`);
 		this.writeLog(`\n✉ ${clock()} ${mode.toUpperCase()}: ${text}\n`);

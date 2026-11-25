@@ -15,6 +15,10 @@ Idle cleanup. Finished workers that nobody reuses no longer keep a pi process fo
 - `worker_status` shows the idle setting. `idle.ts`; `scripts/test-idle.ts` (Runbook T15, 22 checks, no model calls);
   `scripts/test-idle-live.ts` (T16, real model).
 - Tool result `details.workers[]` include the worker's `pid`.
+- Results of tasks you give a worker yourself (`/worker-send`, viewer `m`) reach the manager with a note: `the user
+  gave this task to "<name>" directly … This is a new result, not a duplicate`. Messages you send during a manager's
+  task are mentioned too. TUI header: `⚑ worker <name> done · your task`. Found in V42: the manager called such
+  results duplicates and offered to stop the workers.
 - Widget: an idle-stopped row shows `idle · worker_send revives · → <result>`, and the summary `N stopped while idle`
   (found in manual TUI check B: the row showed only `→ <result>`, like a killed worker).
 

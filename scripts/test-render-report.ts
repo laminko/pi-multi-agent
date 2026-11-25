@@ -10,7 +10,7 @@ import { extensionModule } from "./lib/pi-packages.ts";
 
 const { Worker } = await import(extensionModule("worker.ts"));
 const { statusTable, STATUS_LEGEND } = await import(extensionModule("format.ts"));
-const { formatResultBlock, formatRunningBlock, parseReport, renderReport } = await import(extensionModule("report.ts"));
+const { formatResultBlock, formatRunningBlock, parseReport, renderReport, userOriginNote } = await import(extensionModule("report.ts"));
 const { visibleWidth } = await import("@earendil-works/pi-tui");
 
 const verbose = process.argv.includes("-v");
@@ -179,6 +179,24 @@ const statusText = `${statusTable([done, running])}\n\nlogs: /tmp/run`;
 {
 	const lines = view(doneText, false, 50);
 	check("render: narrow width 50 fits", lines.every((l) => visibleWidth(l) <= 50), lines.find((l) => visibleWidth(l) > 50));
+}
+
+{
+	// A task you gave the worker yourself (/worker-send, viewer m): the manager is told, so it does not call it a duplicate.
+	const w = fakeWorker("w2", "idle", "I reported **9**.");
+	check("origin: no note for a task the manager gave", userOriginNote(w) === "");
+	w.taskBy = "user";
+	w.userMessages = ["what number did you report?"];
+	const note = userOriginNote(w);
+	check("origin: note names the user, quotes the message, says not a duplicate", note.includes("the user gave this task") && note.includes('"what number did you report?"') && note.includes("not a duplicate"), note);
+	const text = `${note}\n\n${formatResultBlock(w, 40_000)}`;
+	const segs = parseReport(text);
+	check("origin: note stays text, block still parses", segs[0]?.kind === "text" && segs[1]?.kind === "worker" && (segs[1] as any).result === "I reported **9**.", JSON.stringify(segs.map((s) => s.kind)));
+	const lines = view(text, false);
+	check("origin: rendered note above the table", lines[0]!.includes("Note: the user gave this task") && !lines.some((l) => TAGS.test(l)), lines.join("\n"));
+	w.taskBy = "manager";
+	w.userMessages = ["focus on db.py"];
+	check("origin: user steer during the manager's task is mentioned", userOriginNote(w).includes("the user also messaged it directly"));
 }
 
 console.log(failures ? `\n${failures} FAILED` : "\nall passed");

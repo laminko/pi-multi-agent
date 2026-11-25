@@ -32,7 +32,7 @@ import {
 	updateHealth,
 } from "./health.ts";
 import { describeIdleConfig, idleSince, readIdleConfig, shouldReap } from "./idle.ts";
-import { formatResultBlock, formatRunningBlock, renderReport } from "./report.ts";
+import { formatResultBlock, formatRunningBlock, renderReport, userOriginNote } from "./report.ts";
 import {
 	INTERRUPTED_NOTE,
 	interruptedRecords,
@@ -273,9 +273,9 @@ export default function multiAgent(pi: ExtensionAPI) {
 			pi.sendMessage(
 				{
 					customType: MESSAGE_TYPE,
-					content: `Worker "${w.name}" finished (${status}).\n\n${formatResultBlock(w, RESULT_BUDGET_BYTES)}`,
+					content: `Worker "${w.name}" finished (${status}).\n\n${withOrigin(w, formatResultBlock(w, RESULT_BUDGET_BYTES))}`,
 					display: true,
-					details: { name: w.name, status },
+					details: { name: w.name, status, by: w.taskBy },
 				},
 				{ deliverAs: "followUp", triggerTurn: true },
 			);
@@ -403,6 +403,12 @@ export default function multiAgent(pi: ExtensionAPI) {
 	async function ensureLive(ctx: ExtensionContext, w: Worker): Promise<Worker> {
 		for (let i = 0; i < 150 && w.idleStoppedAfterMs !== undefined && w.alive && w.stopping; i++) await abortableSleep(100);
 		return revivable(w) ? revive(ctx, w) : w;
+	}
+
+	/** A worker block, preceded by a note when the user directed the task (see userOriginNote). */
+	function withOrigin(w: Worker, block: string): string {
+		const note = userOriginNote(w);
+		return note ? `${note}\n\n${block}` : block;
 	}
 
 	function register(worker: Worker): void {
@@ -726,7 +732,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 		}
 		for (const w of finished) {
 			w.reported = true;
-			parts.push(formatResultBlock(w, budget));
+			parts.push(withOrigin(w, formatResultBlock(w, budget)));
 		}
 		for (const w of running) {
 			parts.push(formatRunningBlock(w));
@@ -775,9 +781,10 @@ export default function multiAgent(pi: ExtensionAPI) {
 	}
 
 	pi.registerMessageRenderer(MESSAGE_TYPE, (message, options, theme) => {
-		const details = message.details as { name?: string; status?: string } | undefined;
+		const details = message.details as { name?: string; status?: string; by?: string } | undefined;
 		const ok = details?.status === "done";
-		const header = theme.fg(ok ? "success" : "warning", theme.bold(`⚑ worker ${details?.name ?? "?"} ${details?.status ?? ""}`));
+		const mine = details?.by === "user" ? theme.fg("dim", " · your task") : "";
+		const header = theme.fg(ok ? "success" : "warning", theme.bold(`⚑ worker ${details?.name ?? "?"} ${details?.status ?? ""}`)) + mine;
 		// The first content line repeats the header ("Worker "x" finished (done)."); the rest is a worker block.
 		const body = textOf(message.content).replace(/^Worker "[^"\n]*" finished \([^)\n]*\)\.\n+/, "");
 		const view = new Container();
@@ -1133,7 +1140,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 							`Message to ${w.name} (${w.busy ? "steers the current task" : "starts a new task"})`,
 							"instructions…",
 						);
-						if (text?.trim()) await w.send(text.trim(), "steer");
+						if (text?.trim()) await w.send(text.trim(), "steer", "user");
 					} else if (action.action === "abort") {
 						if (w.busy) await w.abort();
 					} else if (action.action === "kill") {
@@ -1172,7 +1179,7 @@ export default function multiAgent(pi: ExtensionAPI) {
 			try {
 				let w = getWorker(match[1]!);
 				w = await ensureLive(ctx, w);
-				const disposition = await w.send(match[2]!.trim(), "steer");
+				const disposition = await w.send(match[2]!.trim(), "steer", "user");
 				ctx.ui.notify(`${w.name}: ${disposition === "started" ? "started new task" : `message ${disposition}`}`, "info");
 			} catch (error) {
 				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
