@@ -72,6 +72,11 @@ function preview(w: Worker, theme: ThemeLike, max: number): string {
 	}
 	if (w.status === "error" || w.status === "crashed") return theme.fg("error", oneLine(w.errorMessage ?? w.activity, max));
 	if (w.status === "interrupted") return theme.fg("warning", `↯ ${oneLine(INTERRUPTED_HINT, max - 2)}`);
+	if (w.status === "stopped" && w.idleStoppedAfterMs !== undefined) {
+		// Idle cleanup (idle.ts): say so first, so it is not mistaken for a killed worker; then the result.
+		const tag = "idle · worker_send revives";
+		return theme.fg("dim", w.result ? `${tag} · → ${oneLine(w.result, Math.max(10, max - tag.length - 5))}` : oneLine(tag, max));
+	}
 	if (w.result) return theme.fg("dim", `→ ${oneLine(w.result, max)}`);
 	return theme.fg("dim", oneLine(w.activity, max));
 }
@@ -123,10 +128,12 @@ function widgetLayout(source: WorkerSource, width: number, theme: ThemeLike): Wi
 	const failed = workers.filter((w) => w.status === "error" || w.status === "crashed").length;
 	const interrupted = workers.filter((w) => w.status === "interrupted").length;
 	const stuck = workers.filter((w) => healthNote(w)).length;
+	const idleStopped = workers.filter((w) => w.status === "stopped" && w.idleStoppedAfterMs !== undefined).length;
 	const summary = [`${running} running`, `${done} done`];
 	if (stuck) summary.push(theme.fg("warning", `${stuck} may be stuck`));
 	if (failed) summary.push(`${failed} failed`);
 	if (interrupted) summary.push(theme.fg("warning", `${interrupted} interrupted (/workers-resume)`));
+	if (idleStopped) summary.push(`${idleStopped} stopped while idle`);
 	const lines = [
 		theme.fg("dim", "─ ") +
 			theme.bold("workers") +

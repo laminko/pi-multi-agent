@@ -115,6 +115,7 @@ async function main(): Promise<void> {
 	const handlers = new Map<string, any>();
 	const sent: any[] = [];
 	const toasts: { message: string; level: string }[] = [];
+	let lastWidget: string[] | undefined;
 	multiAgent({
 		registerTool: (tool: any) => tools.set(tool.name, tool),
 		registerCommand() {},
@@ -127,7 +128,12 @@ async function main(): Promise<void> {
 		hasUI: true,
 		mode: "rpc",
 		cwd: process.cwd(),
-		ui: { notify: (message: string, level: string) => toasts.push({ message, level }), setWidget() {} },
+		ui: {
+			notify: (message: string, level: string) => toasts.push({ message, level }),
+			setWidget: (_key: string, lines: string[] | undefined) => {
+				lastWidget = lines;
+			},
+		},
 		sessionManager: { getSessionId: () => "idle-test", getBranch: () => [] },
 		hasPendingMessages: () => false,
 	};
@@ -164,6 +170,13 @@ async function main(): Promise<void> {
 	check("a worker that is reused stays alive", alive(pid2));
 	const status = text0(await call("worker_status", {}));
 	check("it stays listed as stopped, with the revive hint and the setting", /\| ○ +\| helper [^\n]*stopped while idle/.test(status) && status.includes("idle cleanup: worker processes stop after 2s"), status);
+	await sleep(1200); // RPC hosts get plain widget lines, at most once a second
+	const widget = (lastWidget ?? []).join("\n");
+	check(
+		"widget: summary counts it, its row says idle and revivable before the result",
+		widget.includes("1 stopped while idle") && /helper .*idle · worker_send revives · → ok 1/.test(widget),
+		widget,
+	);
 	check("you get an info toast", toasts.some((x) => x.level === "info" && /Worker helper stopped after \d+s idle/.test(x.message)), JSON.stringify(toasts));
 	check("the manager LLM gets no message for it", sent.length === 1 || sent.every((m) => m.details?.name !== "helper" || String(m.content).includes("ok 1")));
 

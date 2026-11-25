@@ -312,7 +312,8 @@ its process stopped (`idle.ts`). Checked about 10 times per idle period (every 1
 - Never while the worker is busy, starting, has queued messages or an open dialog, or a `worker_wait` waits on it.
   Idle time counts from the end of its last task (or its start, if it never had one).
 - The worker stays listed as `○ stopped` with the hint `stopped while idle · worker_send revives it with its
-  context`. Its result, log and session file stay. You get an info toast `Worker <name> stopped after 10m00s idle`;
+  context` (widget: `idle · worker_send revives · → <result>`, and `N stopped while idle` in the summary). Its
+  result, log and session file stay. You get an info toast `Worker <name> stopped after 10m00s idle`;
   the manager LLM gets no message. It no longer counts toward `PI_MULTI_AGENT_MAX_WORKERS`.
 - `worker_send` (and `/worker-send`, viewer `m`) starts it again on its own session file, so it keeps its context;
   the reply starts with `It had been stopped for being idle; restarted on its own session…`. Counters and viewer

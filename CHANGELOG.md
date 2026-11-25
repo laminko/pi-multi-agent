@@ -12,9 +12,11 @@ Idle cleanup. Finished workers that nobody reuses no longer keep a pi process fo
   log and session stay. Info toast for you; no message to the manager LLM.
 - `worker_send`, `/worker-send` and the viewer's `m` key revive it on its own session file (same model, thinking,
   tools, role, cwd), so it keeps its context. Counters and viewer history carry over. Killed workers are not revived.
-- `worker_status` shows the idle setting. `idle.ts`; `scripts/test-idle.ts` (Runbook T15, 21 checks, no model calls);
+- `worker_status` shows the idle setting. `idle.ts`; `scripts/test-idle.ts` (Runbook T15, 22 checks, no model calls);
   `scripts/test-idle-live.ts` (T16, real model).
 - Tool result `details.workers[]` include the worker's `pid`.
+- Widget: an idle-stopped row shows `idle · worker_send revives · → <result>`, and the summary `N stopped while idle`
+  (found in manual TUI check B: the row showed only `→ <result>`, like a killed worker).
 
 ## 0.8.0 — 2026-11-25
 

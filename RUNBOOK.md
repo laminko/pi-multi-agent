@@ -237,7 +237,7 @@ Free, 1 s. No model calls: the workers are fakes rendered with pi's real TUI fun
 node scripts/test-ui-overflow.ts        # add -v to print the rendered widget and tab bars
 ```
 
-**Expected:** 21 `PASS` lines and `all passed`. They cover the widget row order, the `… N more (…)` line,
+**Expected:** 22 `PASS` lines and `all passed`. They cover the widget row order, the `… N more (…)` line,
 `PI_MULTI_AGENT_WIDGET_ROWS`, widget clicks, and the viewer tab window at widths 120, 80 and 60 (current tab and
 counter always visible, markers only where tabs are hidden, marker clicks). The script finds pi's packages through the
 `pi` on `PATH`; if that fails, set `PI_NODE_MODULES` to the `node_modules` directory that contains
@@ -334,7 +334,7 @@ node scripts/test-idle.ts
 **Expected:** 21 `PASS` lines and `all passed`: settings (default 10 min / 30 s tick, `0`/`off`, fractions, junk);
 the reap rule (idle time, busy, waited on, dialog, never had a task, off). Then the extension with a 2 s idle time: an
 idle worker's process stops while a reused one stays alive; the stopped one stays listed with the hint and the
-setting; an info toast and no manager message; `worker_send` revives it on its own session file with counters and
+setting; the widget summary says `1 stopped while idle` and its row `idle · worker_send revives · → <result>`; an info toast and no manager message; `worker_send` revives it on its own session file with counters and
 history; a killed worker is not revived; no process is left after shutdown.
 
 ### T16. Idle cleanup, live
